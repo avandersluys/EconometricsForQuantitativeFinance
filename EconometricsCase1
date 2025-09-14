@@ -1,0 +1,17 @@
+#Econometrics Case 1
+
+#Libraries
+import pandas as pd
+import numpy as np 
+import statsmodels.api as sm
+import matplotlib.pyplot as plt
+
+#Data
+
+# Set relative path to data folder
+DATA_FOLDER = '/Users/siddharth/Documents/GitHub/EconometricsForQuantitativeFinance'
+
+# Load each dataset with a single line
+df_ff = pd.read_csv(f'{DATA_FOLDER}/capmff_2010-2025_ff.csv')
+df_sector = pd.read_csv(f'{DATA_FOLDER}/capmff_2010-2025_sector.csv')
+df_prices = pd.read_csv(f'{DATA_FOLDER}/capmff_2010-2025_prices.csv')
