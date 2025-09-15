@@ -6,7 +6,7 @@ import numpy as np
 import statsmodels.api as sm
 import matplotlib.pyplot as plt
 
-#Data
+#Datat
 
 # Set relative path to data folder
 DATA_FOLDER = '/Users/siddharth/Documents/GitHub/EconometricsForQuantitativeFinance'
@@ -17,3 +17,9 @@ df_sector = pd.read_csv(f'{DATA_FOLDER}/capmff_2010-2025_sector.csv')
 df_prices = pd.read_csv(f'{DATA_FOLDER}/capmff_2010-2025_prices.csv')
 
 # Data Pre-Processing
+print(df_ff.head())
+print(df_sector.head())
+print(df_prices.head())
+
+df_prices['Date'] = pd.to_datetime(df_prices['Date'])
+df_prices.set_index('Date', inplace=True)
