@@ -166,14 +166,14 @@ param_names = res2_sector.params.index.tolist()
 print("Parameter names in Model 2:", param_names)
 
 # Identify interaction terms
-interaction_terms_mkt = [name for name in param_names if 'Mkt_RF:C(sector)' in name]
+interaction_terms_mkt = [name for name in param_names if 'Mkt-RF:C(sector)' in name]
 interaction_terms_smb = [name for name in param_names if 'SMB:C(sector)' in name]
 interaction_terms_hml = [name for name in param_names if 'HML:C(sector)' in name]
 
 # --- Attempt Individual Factor Tests ---
 # Test for Mkt-RF
 if interaction_terms_mkt:
-    hypothesis_mkt = ' = '.join(interaction_terms_mkt) + ' = 0'
+    hypothesis_mkt = ' & '.join([f'{term} = 0' for term in interaction_terms_mkt])
     print(f"\nTesting H0: Betas for Mkt-RF are equal across sectors")
     try:
         f_test_mkt = res2_sector.wald_test(hypothesis_mkt)
@@ -183,7 +183,7 @@ if interaction_terms_mkt:
 
 # Test for SMB
 if interaction_terms_smb:
-    hypothesis_smb = ' = '.join(interaction_terms_smb) + ' = 0'
+    hypothesis_smb = ' & '.join([f'{term} = 0' for term in interaction_terms_smb])
     print(f"\nTesting H0: Betas for SMB are equal across sectors")
     try:
         f_test_smb = res2_sector.wald_test(hypothesis_smb)
@@ -193,7 +193,7 @@ if interaction_terms_smb:
 
 # Test for HML
 if interaction_terms_hml:
-    hypothesis_hml = ' = '.join(interaction_terms_hml) + ' = 0'
+    hypothesis_hml = ' & '.join([f'{term} = 0' for term in interaction_terms_hml])
     print(f"\nTesting H0: Betas for HML are equal across sectors")
     try:
         f_test_hml = res2_sector.wald_test(hypothesis_hml)
@@ -204,7 +204,7 @@ if interaction_terms_hml:
 # --- Attempt Overall Test ---
 all_interaction_terms = interaction_terms_mkt + interaction_terms_smb + interaction_terms_hml
 if all_interaction_terms:
-    hypothesis_all = ' = '.join(all_interaction_terms) + ' = 0'
+    hypothesis_all = ' & '.join([f'{term} = 0' for term in all_interaction_terms])
     print(f"\nTesting H0: ALL Betas (Mkt-RF, SMB, HML) are equal across sectors (Overall Test)")
     try:
         f_test_overall = res2_sector.wald_test(hypothesis_all)
