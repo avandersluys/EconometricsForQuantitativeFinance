@@ -204,19 +204,6 @@ if hausman_stat is not None:
     print(f"Test Statistic: {hausman_stat:.4f}")
     print(f"Degrees of Freedom: {hausman_df}")
     print(f"P-value: {hausman_p:.4f}")
-    
-    alpha = 0.05
-    if hausman_p < alpha:
-        print(f"\nResult: Reject H0 (p-value = {hausman_p:.4f} < {alpha})")
-        print("Conclusion: Fixed Effects model preferred.")
-        print("Random Effects assumptions are violated (correlation between")
-        print("individual effects and regressors exists).")
-    else:
-        print(f"\nResult: Fail to reject H0 (p-value = {hausman_p:.4f} >= {alpha})")
-        print("Conclusion: Random Effects model is consistent and preferred.")
-        print("No evidence of correlation between individual effects and regressors.")
-else:
-    print("Hausman test could not be computed due to numerical issues.")
 
 # Display comparison of coefficients
 print("\n--- Coefficient Comparison: Fixed Effects vs Random Effects ---")
