@@ -138,14 +138,12 @@ print(f"Unique Dates: {panel_data_filtered.index.get_level_values('Date').nuniqu
 print(f"Sectors: {sorted(panel_data_filtered['sector'].unique())}")
 print(panel_data_filtered.head(10))
 
-# 5. Model Estimation 
+# Model Estimation 
 from linearmodels.panel import PanelOLS
 
 # Model 1: Common Beta 
 print("")
 print("Estimating Common Beta Model:")
-# Using PanelOLS with Entity Effects for α_i and common β
-# NOTE: Backticks for column names with special characters
 mod1_common = PanelOLS.from_formula(
     'ExcessReturn ~ 1 + EntityEffects + `Mkt-RF` + SMB + HML',
     data=panel_data_filtered
@@ -164,32 +162,25 @@ mod1_re = RandomEffects.from_formula(
 )
 res1_re = mod1_re.fit(cov_type='robust')
 
-# Estimate Fixed Effects model for comparison (already have res1_common)
+print("Random Effects Model")
+print(res1_re)
+
+# Estimate Fixed Effects model for comparison 
 print("Comparing Fixed Effects vs Random Effects:")
 
-# Manual Hausman Test Implementation
+# Manual Hausman Test Implementation (package gives tuple length error)
 def hausman_test(fe_results, re_results):
-    """
-    Perform Hausman test for Fixed Effects vs Random Effects
-    H0: Random Effects is consistent (prefer FE + RE)
-    H1: Only Fixed Effects is consistent (prefer FE)
-    """
-     
-    # Get coefficients 
+   
     fe_params = fe_results.params[['Mkt-RF', 'SMB', 'HML']].values
     re_params = re_results.params[['Mkt-RF', 'SMB', 'HML']].values
     
-    # Covariance matrices 
     fe_cov = fe_results.cov.loc[['Mkt-RF', 'SMB', 'HML'], ['Mkt-RF', 'SMB', 'HML']].values
     re_cov = re_results.cov.loc[['Mkt-RF', 'SMB', 'HML'], ['Mkt-RF', 'SMB', 'HML']].values
     
-    # Difference in coefficients
     diff = fe_params - re_params
     
-    # Difference in covariance matrices
     cov_diff = fe_cov - re_cov
     
-    # Hausman statistic
     hausman_stat = diff.T @ np.linalg.inv(cov_diff) @ diff
     df = len(diff)
     p_value = 1 - chi2.cdf(hausman_stat, df)
@@ -217,6 +208,7 @@ res2_sector = mod2_sector.fit(cov_type='robust')
 print(res2_sector)
 
 # Difference of Betas Across Sectors
+print("")
 print("Wald test for difference of Betas")
 
 def manual_wald_test(results, param_names_to_test):
