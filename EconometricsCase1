@@ -91,25 +91,12 @@ panel_data_filtered = panel_data_filtered[
     panel_data_filtered['sector'].isin(industries_of_interest)
 ]
 
-<<<<<<< HEAD
 print("\nFinal Panel Data Info:")
 print(f"Shape: {panel_data_filtered.shape}")
 print(f"Unique Tickers: {panel_data_filtered.index.get_level_values('Ticker').nunique()}")
 print(f"Unique Dates: {panel_data_filtered.index.get_level_values('Date').nunique()}")
 print(f"Sectors: {sorted(panel_data_filtered['sector'].unique())}")
 print(panel_data_filtered.head(10))
-=======
-#Path("outputs").mkdir(exist_ok=True)
-#panel_data_filtered.to_csv("outputs/panel_data_filtered.csv")
-
-
-#print("\nFinal Panel Data Info:")
-#print(f"Shape: {panel_data_filtered.shape}")
-#print(f"Unique Tickers: {panel_data_filtered.index.get_level_values('Ticker').nunique()}")
-#print(f"Unique Dates: {panel_data_filtered.index.get_level_values('Date').nunique()}")
-#print(f"Sectors: {sorted(panel_data_filtered['sector'].unique())}")
-#print(panel_data_filtered.head(10))
->>>>>>> 73ffa8ca5598e0a3634582cb854bf2f86052be88
 
 # 5. Model Estimation 
 
@@ -131,30 +118,20 @@ mod1_re = RandomEffects.from_formula(
     'ExcessReturn ~ 1 + `Mkt-RF` + SMB + HML',
     data=panel_data_filtered
 )
-<<<<<<< HEAD
 # Clustered (by entity) SEs
 res1_re = mod1_re.fit(cov_type='clustered', cluster_entity=True)
-=======
-res1_re = mod1_re.fit(cov_type='robust')
-print("Random Effects Model:")
-print(res1_re)
->>>>>>> 73ffa8ca5598e0a3634582cb854bf2f86052be88
 
 # Estimate Fixed Effects model for comparison
 print("Comparing Fixed Effects vs Random Effects:")
 
 # Manual Hausman Test Implementation
 def hausman_test(fe_results, re_results):
-<<<<<<< HEAD
     """
     Hausman test FE vs RE.
     H0: RE is consistent (no correlation between effects and regressors).
     Uses V = Var(FE) - Var(RE) and np.linalg.pinv for stability.
     """
     keep = ['Mkt-RF', 'SMB', 'HML']  # same regressors in both models
-=======
-    keep = ['Mkt-RF', 'SMB', 'HML']  
->>>>>>> 73ffa8ca5598e0a3634582cb854bf2f86052be88
 
     b_fe = fe_results.params[keep].values
     b_re = re_results.params[keep].values
@@ -163,11 +140,7 @@ def hausman_test(fe_results, re_results):
     V_re = re_results.cov.loc[keep, keep].values
 
     diff = b_fe - b_re
-<<<<<<< HEAD
     V = V_fe - V_re  # FE minus RE (as in slides)
-=======
-    V = V_re - V_fe  
->>>>>>> 73ffa8ca5598e0a3634582cb854bf2f86052be88
 
     stat = float(diff.T @ np.linalg.pinv(V) @ diff)
     df = diff.size
@@ -182,10 +155,6 @@ print(f"Test Statistic: {hausman_stat:.4f}")
 print(f"Degrees of Freedom: {hausman_df}")
 print(f"P-value: {hausman_p:.4f}")
 
-<<<<<<< HEAD
-=======
-print("")
->>>>>>> 73ffa8ca5598e0a3634582cb854bf2f86052be88
 print("Model 2: Sector-Specific Betas")
 
 mod2_sector = PanelOLS.from_formula(
@@ -286,7 +255,6 @@ if df_all > 0:
     print(f"Overall sector betas equality (all factors, vs {base_sector}): Wald stat = {stat_all:.4f}, df = {df_all}, p-value = {pval_all:.4f}")
 
 
-<<<<<<< HEAD
 print("Sector beta coefficients with 95% CIs:")
 params = res2_sector.params
 conf_int = res2_sector.conf_int()
@@ -300,8 +268,59 @@ for factor in ['Mkt-RF', 'SMB', 'HML']:
             est = params[key]
             lower, upper = conf_int.loc[key]
             print(f"{sector}: Est={est:.5f}, 95% CI=({lower:.5f}, {upper:.5f})")
-=======
 
 
+#Graphs 
 
->>>>>>> 73ffa8ca5598e0a3634582cb854bf2f86052be88
+# --- Generate Professional Graphs ---
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Set style for professional plots
+plt.style.use('seaborn-v0_8-whitegrid')
+sns.set_palette("Set2")
+
+# 1. Sector Beta Comparison Plot
+def plot_sector_betas():
+    """Create bar plot comparing sector-specific betas"""
+    
+    # Data from your results
+    sectors = ['Basic\nMaterials', 'Communication\nServices', 'Consumer\nCyclical', 'Consumer\nDefensive']
+    mkt_betas = [1.036, 0.952, 1.045, 0.586]
+    smb_betas = [0.219, 0.157, 0.337, -0.191]
+    hml_betas = [0.461, 0.011, 0.180, 0.142]
+    
+    x = np.arange(len(sectors))
+    width = 0.25
+    
+    fig, ax = plt.subplots(figsize=(12, 8))
+    
+    bars1 = ax.bar(x - width, mkt_betas, width, label='Market (Mkt-RF)', alpha=0.8)
+    bars2 = ax.bar(x, smb_betas, width, label='Size (SMB)', alpha=0.8)
+    bars3 = ax.bar(x + width, hml_betas, width, label='Value (HML)', alpha=0.8)
+    
+    ax.set_xlabel('Sector', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Factor Loading (Beta)', fontsize=12, fontweight='bold')
+    ax.set_title('Sector-Specific Fama-French Factor Loadings', fontsize=14, fontweight='bold', pad=20)
+    ax.set_xticks(x)
+    ax.set_xticklabels(sectors, fontsize=10)
+    ax.legend(fontsize=11)
+    ax.grid(True, alpha=0.3)
+    
+    # Add value labels on bars
+    def add_value_labels(bars):
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height + 0.01 if height >= 0 else height - 0.03,
+                   f'{height:.3f}', ha='center', va='bottom' if height >= 0 else 'top', fontsize=9)
+    
+    add_value_labels(bars1)
+    add_value_labels(bars2)
+    add_value_labels(bars3)
+    
+    plt.tight_layout()
+    plt.savefig('sector_betas.png', dpi=300, bbox_inches='tight')
+    plt.savefig('sector_betas.pdf', bbox_inches='tight')
+    plt.show()
+
+plot_sector_betas()
