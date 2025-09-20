@@ -7,6 +7,7 @@ import statsmodels.api as sm
 import matplotlib.pyplot as plt
 from pathlib import Path
 import warnings
+from scipy.stats import chi2 #for hausman test
 
 
 # Base URL for raw GitHub repo
@@ -171,16 +172,16 @@ print("Comparing Fixed Effects vs Random Effects...")
 def hausman_test(fe_results, re_results):
     """
     Perform Hausman test for Fixed Effects vs Random Effects
-    H0: Random Effects is consistent (prefer RE)
+    H0: Random Effects is consistent (prefer FE + RE)
     H1: Only Fixed Effects is consistent (prefer FE)
     """
-    from scipy.stats import chi2  # Import within function
+     
     
-    # Get coefficients (exclude intercept for FE, include for RE)
+    # Get coefficients 
     fe_params = fe_results.params[['Mkt-RF', 'SMB', 'HML']].values
     re_params = re_results.params[['Mkt-RF', 'SMB', 'HML']].values
     
-    # Get covariance matrices 
+    # Covariance matrices 
     fe_cov = fe_results.cov.loc[['Mkt-RF', 'SMB', 'HML'], ['Mkt-RF', 'SMB', 'HML']].values
     re_cov = re_results.cov.loc[['Mkt-RF', 'SMB', 'HML'], ['Mkt-RF', 'SMB', 'HML']].values
     
@@ -191,14 +192,11 @@ def hausman_test(fe_results, re_results):
     cov_diff = fe_cov - re_cov
     
     # Hausman statistic
-    try:
-        hausman_stat = diff.T @ np.linalg.inv(cov_diff) @ diff
-        df = len(diff)
-        p_value = 1 - chi2.cdf(hausman_stat, df)
-        return hausman_stat, p_value, df
-    except np.linalg.LinAlgError:
-        print("Warning: Covariance matrix difference is not invertible.")
-        return None, None, None
+    hausman_stat = diff.T @ np.linalg.inv(cov_diff) @ diff
+    df = len(diff)
+    p_value = 1 - chi2.cdf(hausman_stat, df)
+    return hausman_stat, p_value, df
+
 
 # Perform Hausman test
 hausman_stat, hausman_p, hausman_df = hausman_test(res1_common, res1_re)
