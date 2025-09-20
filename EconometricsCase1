@@ -78,10 +78,17 @@ returns_df['ExcessReturn'] = returns_df['Return'] - returns_df['RF']
 
 #print(returns_df.head(450))
 
-Path("outputs").mkdir(exist_ok=True)
-returns_df.to_csv("outputs/prices_sel_multiindex.csv")
+ff_factors = df_ff[['Date', 'Mkt-RF', 'SMB', 'HML']].copy()
+ff_factors['Date'] = pd.to_datetime(ff_factors['Date'])
 
-panel_data_filtered = 
+returns_df = (returns_df.reset_index()
+              .merge(ff_factors, on='Date', how='left')
+              .set_index(['Ticker','Date'])
+              .dropna(subset=['Mkt-RF','SMB','HML']))  # keep only rows with factors
+
+Path("outputs").mkdir(exist_ok=True)
+returns_df.to_csv("outputs/returns_df.csv")
+
 
 #print(f"Total observations: {n_obs:,}")
 ##print(f"Unique tickers:     {n_tickers}")
