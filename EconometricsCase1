@@ -8,7 +8,13 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import warnings
 from scipy.stats import chi2 #for hausman test
+from linearmodels.panel import RandomEffects
 
+warnings.filterwarnings(
+    "ignore",
+    category=RuntimeWarning,
+    module=r"linearmodels\.panel\..*"
+)
 
 # Base URL for raw GitHub repo
 BASE_URL = "https://raw.githubusercontent.com/avandersluys/EconometricsForQuantitativeFinance/main"
@@ -28,7 +34,7 @@ prices_long = (
     .reset_index(drop=True)
 )
 
-# Panel-style MultiIndex (Ticker, Date)
+# MultiIndex
 prices_panel = prices_long.set_index(['Ticker','Date']).sort_index()
 
 print(prices_panel.shape)
@@ -45,33 +51,29 @@ tickersOfInterest = df_sector.loc[df_sector['sector'].isin(industries_of_interes
 #print(tickersOfInterest[:20])
 
 prices_sel = prices_panel[prices_panel.index.get_level_values('Ticker').isin(tickersOfInterest)]
-print(prices_sel.head(10))
+#print(prices_sel.head(10))
 
 df_returns = prices_sel.pct_change(fill_method=None).dropna()
-print(df_returns.head(450))
+#print(df_returns.head(450))
 
-# Ensure DF types/index
+
 df_ff['Date'] = pd.to_datetime(df_ff['Date'])
-rf = df_ff.set_index('Date')['RF']          # if RF is in %, do: rf = rf / 100
+rf = df_ff.set_index('Date')['RF']          
 
-# Map RF onto the panel by the Date level, then compute excess returns
-# ----- Compute within-ticker returns -----
-# (prices_sel has MultiIndex ['Ticker','Date'] and column 'Price')
+
 returns_df = (
     prices_sel
-    .groupby(level='Ticker')           # compute pct change per ticker
+    .groupby(level='Ticker')           
     .pct_change(fill_method=None)
     .dropna()
     .rename(columns={'Price': 'Return'})
 )
 
 
-# ----- Align RF and compute excess returns -----
+# Compute excess returns
 df_ff['Date'] = pd.to_datetime(df_ff['Date'])
 rf = df_ff.set_index('Date')['RF']
 
-# If RF is in percent (e.g., 0.05 for 5%), convert:
-# if rf.abs().max() > 1: rf = rf / 100.0
 
 returns_df = returns_df.copy()
 returns_df['RF'] = returns_df.index.get_level_values('Date').map(rf)
@@ -118,30 +120,30 @@ panel_data_with_sector = returns_df.reset_index().merge(
     on='Ticker', # Merge on 'Ticker' column
     how='left'
 )
-# Set the MultiIndex back
+
 panel_data_filtered = panel_data_with_sector.set_index(['Ticker', 'Date'])
 
 # Filter to sectors of interest
 panel_data_filtered = panel_data_filtered[
     panel_data_filtered['sector'].isin(industries_of_interest)
 ]
-Path("outputs").mkdir(exist_ok=True)
-panel_data_filtered.to_csv("outputs/panel_data_filtered.csv")
+#Path("outputs").mkdir(exist_ok=True)
+#panel_data_filtered.to_csv("outputs/panel_data_filtered.csv")
 
 
-print("\n--- Final Panel Data Info ---")
+print("\nFinal Panel Data Info:")
 print(f"Shape: {panel_data_filtered.shape}")
 print(f"Unique Tickers: {panel_data_filtered.index.get_level_values('Ticker').nunique()}")
 print(f"Unique Dates: {panel_data_filtered.index.get_level_values('Date').nunique()}")
 print(f"Sectors: {sorted(panel_data_filtered['sector'].unique())}")
 print(panel_data_filtered.head(10))
 
-# --- 5. Model Estimation ---
+# 5. Model Estimation 
 from linearmodels.panel import PanelOLS
 
-# --- Model 1: Common Beta (Equation 1 from Assignment) ---
-# y_it = α_i + f_t * β + ϵ_it
-print("\n--- Estimating Model 1: Common Beta (Eq. 1) ---")
+# Model 1: Common Beta 
+print("")
+print("Estimating Common Beta Model:")
 # Using PanelOLS with Entity Effects for α_i and common β
 # NOTE: Backticks for column names with special characters
 mod1_common = PanelOLS.from_formula(
@@ -151,14 +153,11 @@ mod1_common = PanelOLS.from_formula(
 res1_common = mod1_common.fit(cov_type='robust')
 print(res1_common)
 
-# --- Hausman Test: Fixed Effects vs Random Effects ---
-print("\n--- Hausman Test: Fixed Effects vs Random Effects ---")
+# Hausman Test
+print("\nHausman Test: Fixed Effects vs Random Effects:")
 
-from linearmodels.panel import RandomEffects
-from scipy.stats import chi2  # Add this import at the top
-
-# Estimate Random Effects model (Model 1 with RE)
-print("Estimating Random Effects Model...")
+# Estimate RE model
+print("Estimating Random Effects Model:")
 mod1_re = RandomEffects.from_formula(
     'ExcessReturn ~ 1 + `Mkt-RF` + SMB + HML',
     data=panel_data_filtered
@@ -166,7 +165,7 @@ mod1_re = RandomEffects.from_formula(
 res1_re = mod1_re.fit(cov_type='robust')
 
 # Estimate Fixed Effects model for comparison (already have res1_common)
-print("Comparing Fixed Effects vs Random Effects...")
+print("Comparing Fixed Effects vs Random Effects:")
 
 # Manual Hausman Test Implementation
 def hausman_test(fe_results, re_results):
@@ -176,7 +175,6 @@ def hausman_test(fe_results, re_results):
     H1: Only Fixed Effects is consistent (prefer FE)
     """
      
-    
     # Get coefficients 
     fe_params = fe_results.params[['Mkt-RF', 'SMB', 'HML']].values
     re_params = re_results.params[['Mkt-RF', 'SMB', 'HML']].values
