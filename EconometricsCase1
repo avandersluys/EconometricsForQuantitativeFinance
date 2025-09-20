@@ -5,16 +5,19 @@ import pandas as pd
 import numpy as np 
 import statsmodels.api as sm
 import matplotlib.pyplot as plt
+from pathlib import Path
+
+
 
 # Base URL for raw GitHub repo
 BASE_URL = "https://raw.githubusercontent.com/avandersluys/EconometricsForQuantitativeFinance/main"
 
-# Load datasets directly from GitHub
+# Loading datasets directly from GitHub
 df_ff = pd.read_csv(f"{BASE_URL}/capmff_2010-2025_ff.csv")
 df_sector = pd.read_csv(f"{BASE_URL}/capmff_2010-2025_sector.csv")
 df_prices = pd.read_csv(f"{BASE_URL}/capmff_2010-2025_prices.csv")
 
-# Reshape wide prices into long panel format
+# Reformatting the dataframe to multiindex panel style
 prices_long = (
     df_prices
     .assign(Date=pd.to_datetime(df_prices['Date']))
@@ -29,11 +32,11 @@ prices_panel = prices_long.set_index(['Ticker','Date']).sort_index()
 
 print(prices_panel.shape)
 
-n_obs = prices_panel.shape[0]
-n_tickers = prices_panel.index.get_level_values('Ticker').nunique()
-n_dates = prices_panel.index.get_level_values('Date').nunique()
-date_min = prices_panel.index.get_level_values('Date').min()
-date_max = prices_panel.index.get_level_values('Date').max()
+#n_obs = prices_panel.shape[0]
+#n_tickers = prices_panel.index.get_level_values('Ticker').nunique()
+#n_dates = prices_panel.index.get_level_values('Date').nunique()
+#date_min = prices_panel.index.get_level_values('Date').min()
+#date_max = prices_panel.index.get_level_values('Date').max()
 
 
 industries_of_interest = ['Basic Materials', 'Communication Services', 'Consumer Cyclical', 'Consumer Defensive']
@@ -43,15 +46,42 @@ tickersOfInterest = df_sector.loc[df_sector['sector'].isin(industries_of_interes
 prices_sel = prices_panel[prices_panel.index.get_level_values('Ticker').isin(tickersOfInterest)]
 print(prices_sel.head(10))
 
+df_returns = prices_sel.pct_change(fill_method=None).dropna()
+print(df_returns.head(450))
 
+# Ensure DF types/index
+df_ff['Date'] = pd.to_datetime(df_ff['Date'])
+rf = df_ff.set_index('Date')['RF']          # if RF is in %, do: rf = rf / 100
 
+# Map RF onto the panel by the Date level, then compute excess returns
+# ----- Compute within-ticker returns -----
+# (prices_sel has MultiIndex ['Ticker','Date'] and column 'Price')
+returns_df = (
+    prices_sel
+    .groupby(level='Ticker')           # compute pct change per ticker
+    .pct_change(fill_method=None)
+    .dropna()
+    .rename(columns={'Price': 'Return'})
+)
 
-#from pathlib import Path
-#Path("outputs").mkdir(exist_ok=True)
-#prices_sel.to_csv("outputs/prices_sel_multiindex.csv")
+# ----- Align RF and compute excess returns -----
+df_ff['Date'] = pd.to_datetime(df_ff['Date'])
+rf = df_ff.set_index('Date')['RF']
 
+# If RF is in percent (e.g., 0.05 for 5%), convert:
+# if rf.abs().max() > 1: rf = rf / 100.0
 
+returns_df = returns_df.copy()
+returns_df['RF'] = returns_df.index.get_level_values('Date').map(rf)
+returns_df = returns_df.dropna(subset=['RF'])
+returns_df['ExcessReturn'] = returns_df['Return'] - returns_df['RF']
 
+#print(returns_df.head(450))
+
+Path("outputs").mkdir(exist_ok=True)
+returns_df.to_csv("outputs/prices_sel_multiindex.csv")
+
+panel_data_filtered = 
 
 #print(f"Total observations: {n_obs:,}")
 ##print(f"Unique tickers:     {n_tickers}")
@@ -68,5 +98,5 @@ print(prices_sel.head(10))
 #df_prices['Date'] = pd.to_datetime(df_prices['Date'])
 #df_prices.set_index('Date', inplace=True)
 
-#df_returns = df_prices.pct_change(fill_method=None).dropna()
+
 #df_excess_returns = df_returns.subtract(df_ff['RF'], axis=0)
