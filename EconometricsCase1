@@ -6,7 +6,7 @@ import numpy as np
 import statsmodels.api as sm
 import matplotlib.pyplot as plt
 from pathlib import Path
-
+import warnings
 
 
 # Base URL for raw GitHub repo
@@ -99,7 +99,6 @@ returns_df = (returns_df.reset_index()
 #print(f"Date range:         {date_min.date()} → {date_max.date()}")
 #print(f"Avg. obs per firm:  {n_obs / n_firms:,.0f}")
 
-
 # Data Pre-Processing
 #print(df_ff.head())
 #print(df_sector.head())
@@ -150,6 +149,96 @@ mod1_common = PanelOLS.from_formula(
 )
 res1_common = mod1_common.fit(cov_type='robust')
 print(res1_common)
+
+# --- Hausman Test: Fixed Effects vs Random Effects ---
+print("\n--- Hausman Test: Fixed Effects vs Random Effects ---")
+
+from linearmodels.panel import RandomEffects
+from scipy.stats import chi2  # Add this import at the top
+
+# Estimate Random Effects model (Model 1 with RE)
+print("Estimating Random Effects Model...")
+mod1_re = RandomEffects.from_formula(
+    'ExcessReturn ~ 1 + `Mkt-RF` + SMB + HML',
+    data=panel_data_filtered
+)
+res1_re = mod1_re.fit(cov_type='robust')
+
+# Estimate Fixed Effects model for comparison (already have res1_common)
+print("Comparing Fixed Effects vs Random Effects...")
+
+# Manual Hausman Test Implementation
+def hausman_test(fe_results, re_results):
+    """
+    Perform Hausman test for Fixed Effects vs Random Effects
+    H0: Random Effects is consistent (prefer RE)
+    H1: Only Fixed Effects is consistent (prefer FE)
+    """
+    from scipy.stats import chi2  # Import within function
+    
+    # Get coefficients (exclude intercept for FE, include for RE)
+    fe_params = fe_results.params[['Mkt-RF', 'SMB', 'HML']].values
+    re_params = re_results.params[['Mkt-RF', 'SMB', 'HML']].values
+    
+    # Get covariance matrices 
+    fe_cov = fe_results.cov.loc[['Mkt-RF', 'SMB', 'HML'], ['Mkt-RF', 'SMB', 'HML']].values
+    re_cov = re_results.cov.loc[['Mkt-RF', 'SMB', 'HML'], ['Mkt-RF', 'SMB', 'HML']].values
+    
+    # Difference in coefficients
+    diff = fe_params - re_params
+    
+    # Difference in covariance matrices
+    cov_diff = fe_cov - re_cov
+    
+    # Hausman statistic
+    try:
+        hausman_stat = diff.T @ np.linalg.inv(cov_diff) @ diff
+        df = len(diff)
+        p_value = 1 - chi2.cdf(hausman_stat, df)
+        return hausman_stat, p_value, df
+    except np.linalg.LinAlgError:
+        print("Warning: Covariance matrix difference is not invertible.")
+        return None, None, None
+
+# Perform Hausman test
+hausman_stat, hausman_p, hausman_df = hausman_test(res1_common, res1_re)
+
+if hausman_stat is not None:
+    print(f"\n--- Hausman Test Results ---")
+    print(f"Test Statistic: {hausman_stat:.4f}")
+    print(f"Degrees of Freedom: {hausman_df}")
+    print(f"P-value: {hausman_p:.4f}")
+    
+    alpha = 0.05
+    if hausman_p < alpha:
+        print(f"\nResult: Reject H0 (p-value = {hausman_p:.4f} < {alpha})")
+        print("Conclusion: Fixed Effects model preferred.")
+        print("Random Effects assumptions are violated (correlation between")
+        print("individual effects and regressors exists).")
+    else:
+        print(f"\nResult: Fail to reject H0 (p-value = {hausman_p:.4f} >= {alpha})")
+        print("Conclusion: Random Effects model is consistent and preferred.")
+        print("No evidence of correlation between individual effects and regressors.")
+else:
+    print("Hausman test could not be computed due to numerical issues.")
+
+# Display comparison of coefficients
+print("\n--- Coefficient Comparison: Fixed Effects vs Random Effects ---")
+print("Variable        FE Estimate    RE Estimate    Difference")
+print("-" * 55)
+for var in ['Mkt-RF', 'SMB', 'HML']:
+    fe_coef = res1_common.params[var]
+    re_coef = res1_re.params[var]
+    diff = fe_coef - re_coef
+    print(f"{var:<12}  {fe_coef:>10.6f}   {re_coef:>10.6f}   {diff:>10.6f}")
+
+print(f"\nR-squared comparison:")
+print(f"Fixed Effects (Within):  {res1_common.rsquared_within:.4f}")
+print(f"Random Effects (Overall): {res1_re.rsquared_overall:.4f}")
+
+print("\n--- Random Effects Model Summary ---")
+print(res1_re)
+
 
 # --- Model 2: Sector-Specific Betas (Equation 2 from Assignment) ---
 # y_it = α_i + f_t * β_s + ϵ_it
