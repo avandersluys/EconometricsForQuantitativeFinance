@@ -201,64 +201,31 @@ def hausman_test(fe_results, re_results):
 # Perform Hausman test
 hausman_stat, hausman_p, hausman_df = hausman_test(res1_common, res1_re)
 
-if hausman_stat is not None:
-    print(f"\n--- Hausman Test Results ---")
-    print(f"Test Statistic: {hausman_stat:.4f}")
-    print(f"Degrees of Freedom: {hausman_df}")
-    print(f"P-value: {hausman_p:.4f}")
 
-# Display comparison of coefficients
-print("\n--- Coefficient Comparison: Fixed Effects vs Random Effects ---")
-print("Variable        FE Estimate    RE Estimate    Difference")
-print("-" * 55)
-for var in ['Mkt-RF', 'SMB', 'HML']:
-    fe_coef = res1_common.params[var]
-    re_coef = res1_re.params[var]
-    diff = fe_coef - re_coef
-    print(f"{var:<12}  {fe_coef:>10.6f}   {re_coef:>10.6f}   {diff:>10.6f}")
-
-print(f"\nR-squared comparison:")
-print(f"Fixed Effects (Within):  {res1_common.rsquared_within:.4f}")
-print(f"Random Effects (Overall): {res1_re.rsquared_overall:.4f}")
-
-print("\n--- Random Effects Model Summary ---")
-print(res1_re)
+print(f"\n--- Hausman Test Results ---")
+print(f"Test Statistic: {hausman_stat:.4f}")
+print(f"Degrees of Freedom: {hausman_df}")
+print(f"P-value: {hausman_p:.4f}")
 
 
-# --- Model 2: Sector-Specific Betas (Equation 2 from Assignment) ---
-# y_it = α_i + f_t * β_s + ϵ_it
-print("\n--- Estimating Model 2: Sector-Specific Betas (Eq. 2) ---")
-# Using PanelOLS with Entity Effects and interactions for β_s
-# Omit main C(sector) term to avoid multicollinearity
+print("Model 2: Sector-Specific Betas")
+
 mod2_sector = PanelOLS.from_formula(
     'ExcessReturn ~ 1 + EntityEffects + `Mkt-RF`:C(sector) + SMB:C(sector) + HML:C(sector)',
     data=panel_data_filtered,
-    drop_absorbed=True # Handle potential numerical issues
+    drop_absorbed=True 
 )
 res2_sector = mod2_sector.fit(cov_type='robust')
 print(res2_sector)
 
-# --- 6. Hypothesis Testing: Are Betas Different Across Sectors? ---
-print("\n--- Testing for Differences in Betas Across Sectors ---")
-
-import numpy as np
-from scipy.stats import chi2
+# Difference of Betas Across Sectors
+print("Wald test for difference of Betas")
 
 def manual_wald_test(results, param_names_to_test):
-    """
-    Perform manual Wald test for joint hypothesis that all parameters in param_names_to_test are zero.
-    """
+   
     param_names = results.params.index.to_list()
-
-    # Validate parameter existence
-    for name in param_names_to_test:
-        if name not in param_names:
-            raise ValueError(f"Parameter '{name}' not found in results.")
-
-    # Indices of parameters to test
     indices = [param_names.index(name) for name in param_names_to_test]
 
-    # Construct restriction matrix R
     R = np.zeros((len(indices), len(param_names)))
     for i, idx in enumerate(indices):
         R[i, idx] = 1
@@ -275,13 +242,10 @@ def manual_wald_test(results, param_names_to_test):
 
     return wald_stat, p_value
 
-# Extract relevant parameter names for each factor's sector interactions
 param_names = res2_sector.params.index.to_list()
 interaction_terms_mkt = [name for name in param_names if 'Mkt-RF:C(sector)' in name]
 interaction_terms_smb = [name for name in param_names if 'SMB:C(sector)' in name]
 interaction_terms_hml = [name for name in param_names if 'HML:C(sector)' in name]
-
-print("\nManual Wald Tests for Equality of Sector-Specific Betas")
 
 if interaction_terms_mkt:
     stat_mkt, pval_mkt = manual_wald_test(res2_sector, interaction_terms_mkt)
