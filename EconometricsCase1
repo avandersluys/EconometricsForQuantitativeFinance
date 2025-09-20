@@ -1,20 +1,18 @@
-#Econometrics Case 1
+# Econometrics Case 1
 
-#Libraries
+# Libraries
 import pandas as pd
 import numpy as np 
 import statsmodels.api as sm
 import matplotlib.pyplot as plt
 
-#Data
+# Base URL for raw GitHub repo
+BASE_URL = "https://raw.githubusercontent.com/avandersluys/EconometricsForQuantitativeFinance/main"
 
-# Set relative path to data folder
-DATA_FOLDER = '/Users/siddharth/Documents/GitHub/EconometricsForQuantitativeFinance'
-
-# Load each dataset
-df_ff = pd.read_csv(f'{DATA_FOLDER}/capmff_2010-2025_ff.csv')
-df_sector = pd.read_csv(f'{DATA_FOLDER}/capmff_2010-2025_sector.csv')
-df_prices = pd.read_csv(f'{DATA_FOLDER}/capmff_2010-2025_prices.csv')
+# Load datasets directly from GitHub
+df_ff = pd.read_csv(f"{BASE_URL}/capmff_2010-2025_ff.csv")
+df_sector = pd.read_csv(f"{BASE_URL}/capmff_2010-2025_sector.csv")
+df_prices = pd.read_csv(f"{BASE_URL}/capmff_2010-2025_prices.csv")
 
 # Data Pre-Processing
 print(df_ff.head())
@@ -26,4 +24,3 @@ df_prices.set_index('Date', inplace=True)
 
 df_returns = df_prices.pct_change().dropna()
 df_excess_returns = df_returns.subtract(df_ff['RF'], axis=0)
-
