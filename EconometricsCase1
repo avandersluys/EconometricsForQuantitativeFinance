@@ -279,3 +279,58 @@ for factor in ['Mkt-RF', 'SMB', 'HML']:
             est = params[key]
             lower, upper = conf_int.loc[key]
             print(f"{sector}: Est={est:.5f}, 95% CI=({lower:.5f}, {upper:.5f})")
+
+#Graphs 
+
+# --- Generate Professional Graphs ---
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Set style for professional plots
+plt.style.use('seaborn-v0_8-whitegrid')
+sns.set_palette("Set2")
+
+# 1. Sector Beta Comparison Plot
+def plot_sector_betas():
+    """Create bar plot comparing sector-specific betas"""
+    
+    # Data from your results
+    sectors = ['Basic\nMaterials', 'Communication\nServices', 'Consumer\nCyclical', 'Consumer\nDefensive']
+    mkt_betas = [1.036, 0.952, 1.045, 0.586]
+    smb_betas = [0.219, 0.157, 0.337, -0.191]
+    hml_betas = [0.461, 0.011, 0.180, 0.142]
+    
+    x = np.arange(len(sectors))
+    width = 0.25
+    
+    fig, ax = plt.subplots(figsize=(12, 8))
+    
+    bars1 = ax.bar(x - width, mkt_betas, width, label='Market (Mkt-RF)', alpha=0.8)
+    bars2 = ax.bar(x, smb_betas, width, label='Size (SMB)', alpha=0.8)
+    bars3 = ax.bar(x + width, hml_betas, width, label='Value (HML)', alpha=0.8)
+    
+    ax.set_xlabel('Sector', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Factor Loading (Beta)', fontsize=12, fontweight='bold')
+    ax.set_title('Sector-Specific Fama-French Factor Loadings', fontsize=14, fontweight='bold', pad=20)
+    ax.set_xticks(x)
+    ax.set_xticklabels(sectors, fontsize=10)
+    ax.legend(fontsize=11)
+    ax.grid(True, alpha=0.3)
+    
+    # Add value labels on bars
+    def add_value_labels(bars):
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height + 0.01 if height >= 0 else height - 0.03,
+                   f'{height:.3f}', ha='center', va='bottom' if height >= 0 else 'top', fontsize=9)
+    
+    add_value_labels(bars1)
+    add_value_labels(bars2)
+    add_value_labels(bars3)
+    
+    plt.tight_layout()
+    plt.savefig('sector_betas.png', dpi=300, bbox_inches='tight')
+    plt.savefig('sector_betas.pdf', bbox_inches='tight')
+    plt.show()
+
+plot_sector_betas()
