@@ -64,6 +64,7 @@ returns_df = (
     .rename(columns={'Price': 'Return'})
 )
 
+
 # ----- Align RF and compute excess returns -----
 df_ff['Date'] = pd.to_datetime(df_ff['Date'])
 rf = df_ff.set_index('Date')['RF']
@@ -86,8 +87,10 @@ returns_df = (returns_df.reset_index()
               .set_index(['Ticker','Date'])
               .dropna(subset=['Mkt-RF','SMB','HML']))  # keep only rows with factors
 
-Path("outputs").mkdir(exist_ok=True)
-returns_df.to_csv("outputs/returns_df.csv")
+
+
+#Path("outputs").mkdir(exist_ok=True)
+#returns_df.to_csv("outputs/returns_df.csv")
 
 
 #print(f"Total observations: {n_obs:,}")
@@ -122,6 +125,9 @@ panel_data_filtered = panel_data_with_sector.set_index(['Ticker', 'Date'])
 panel_data_filtered = panel_data_filtered[
     panel_data_filtered['sector'].isin(industries_of_interest)
 ]
+Path("outputs").mkdir(exist_ok=True)
+panel_data_filtered.to_csv("outputs/panel_data_filtered.csv")
+
 
 print("\n--- Final Panel Data Info ---")
 print(f"Shape: {panel_data_filtered.shape}")
