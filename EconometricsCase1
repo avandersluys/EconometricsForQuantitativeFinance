@@ -91,12 +91,25 @@ panel_data_filtered = panel_data_filtered[
     panel_data_filtered['sector'].isin(industries_of_interest)
 ]
 
+<<<<<<< HEAD
 print("\nFinal Panel Data Info:")
 print(f"Shape: {panel_data_filtered.shape}")
 print(f"Unique Tickers: {panel_data_filtered.index.get_level_values('Ticker').nunique()}")
 print(f"Unique Dates: {panel_data_filtered.index.get_level_values('Date').nunique()}")
 print(f"Sectors: {sorted(panel_data_filtered['sector'].unique())}")
 print(panel_data_filtered.head(10))
+=======
+#Path("outputs").mkdir(exist_ok=True)
+#panel_data_filtered.to_csv("outputs/panel_data_filtered.csv")
+
+
+#print("\nFinal Panel Data Info:")
+#print(f"Shape: {panel_data_filtered.shape}")
+#print(f"Unique Tickers: {panel_data_filtered.index.get_level_values('Ticker').nunique()}")
+#print(f"Unique Dates: {panel_data_filtered.index.get_level_values('Date').nunique()}")
+#print(f"Sectors: {sorted(panel_data_filtered['sector'].unique())}")
+#print(panel_data_filtered.head(10))
+>>>>>>> 73ffa8ca5598e0a3634582cb854bf2f86052be88
 
 # 5. Model Estimation 
 
@@ -113,29 +126,35 @@ mod1_common = PanelOLS.from_formula(
 res1_common = mod1_common.fit(cov_type='clustered', cluster_entity=True)
 print(res1_common)
 
-# Hausman Test
-print("\nHausman Test: Fixed Effects vs Random Effects:")
-
 # Estimate RE model
-print("Estimating Random Effects Model:")
 mod1_re = RandomEffects.from_formula(
     'ExcessReturn ~ 1 + `Mkt-RF` + SMB + HML',
     data=panel_data_filtered
 )
+<<<<<<< HEAD
 # Clustered (by entity) SEs
 res1_re = mod1_re.fit(cov_type='clustered', cluster_entity=True)
+=======
+res1_re = mod1_re.fit(cov_type='robust')
+print("Random Effects Model:")
+print(res1_re)
+>>>>>>> 73ffa8ca5598e0a3634582cb854bf2f86052be88
 
-# Estimate Fixed Effects model for comparison (already have res1_common)
+# Estimate Fixed Effects model for comparison
 print("Comparing Fixed Effects vs Random Effects:")
 
 # Manual Hausman Test Implementation
 def hausman_test(fe_results, re_results):
+<<<<<<< HEAD
     """
     Hausman test FE vs RE.
     H0: RE is consistent (no correlation between effects and regressors).
     Uses V = Var(FE) - Var(RE) and np.linalg.pinv for stability.
     """
     keep = ['Mkt-RF', 'SMB', 'HML']  # same regressors in both models
+=======
+    keep = ['Mkt-RF', 'SMB', 'HML']  
+>>>>>>> 73ffa8ca5598e0a3634582cb854bf2f86052be88
 
     b_fe = fe_results.params[keep].values
     b_re = re_results.params[keep].values
@@ -144,7 +163,11 @@ def hausman_test(fe_results, re_results):
     V_re = re_results.cov.loc[keep, keep].values
 
     diff = b_fe - b_re
+<<<<<<< HEAD
     V = V_fe - V_re  # FE minus RE (as in slides)
+=======
+    V = V_re - V_fe  
+>>>>>>> 73ffa8ca5598e0a3634582cb854bf2f86052be88
 
     stat = float(diff.T @ np.linalg.pinv(V) @ diff)
     df = diff.size
@@ -159,6 +182,10 @@ print(f"Test Statistic: {hausman_stat:.4f}")
 print(f"Degrees of Freedom: {hausman_df}")
 print(f"P-value: {hausman_p:.4f}")
 
+<<<<<<< HEAD
+=======
+print("")
+>>>>>>> 73ffa8ca5598e0a3634582cb854bf2f86052be88
 print("Model 2: Sector-Specific Betas")
 
 mod2_sector = PanelOLS.from_formula(
@@ -171,6 +198,7 @@ res2_sector = mod2_sector.fit(cov_type='clustered', cluster_entity=True)
 print(res2_sector)
 
 # Difference of Betas Across Sectors
+print("")
 print("Wald test for difference of Betas")
 
 # Build and test linear contrasts: for each factor, test equality across sectors vs a base sector
@@ -257,16 +285,8 @@ stat_all, pval_all, df_all = wald_overall(res2_sector, ['Mkt-RF','SMB','HML'], s
 if df_all > 0:
     print(f"Overall sector betas equality (all factors, vs {base_sector}): Wald stat = {stat_all:.4f}, df = {df_all}, p-value = {pval_all:.4f}")
 
-    # Interpretation
-    alpha = 0.05
-    print("\n--- Overall Test Conclusion ---")
-    if pval_all < alpha:
-        print(f"Reject H0: Betas differ across sectors (p-value = {pval_all:.4f} < {alpha})")
-        print("Model 2 (sector-specific betas) preferred.")
-    else:
-        print(f"Fail to reject H0: No strong evidence of beta differences (p-value = {pval_all:.4f} >= {alpha})")
-        print("Model 1 (common beta) might suffice.")
 
+<<<<<<< HEAD
 print("Sector beta coefficients with 95% CIs:")
 params = res2_sector.params
 conf_int = res2_sector.conf_int()
@@ -280,3 +300,8 @@ for factor in ['Mkt-RF', 'SMB', 'HML']:
             est = params[key]
             lower, upper = conf_int.loc[key]
             print(f"{sector}: Est={est:.5f}, 95% CI=({lower:.5f}, {upper:.5f})")
+=======
+
+
+
+>>>>>>> 73ffa8ca5598e0a3634582cb854bf2f86052be88
