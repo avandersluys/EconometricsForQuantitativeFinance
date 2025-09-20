@@ -14,13 +14,42 @@ df_ff = pd.read_csv(f"{BASE_URL}/capmff_2010-2025_ff.csv")
 df_sector = pd.read_csv(f"{BASE_URL}/capmff_2010-2025_sector.csv")
 df_prices = pd.read_csv(f"{BASE_URL}/capmff_2010-2025_prices.csv")
 
+# Reshape wide prices into long panel format
+prices_long = (
+    df_prices
+    .assign(Date=pd.to_datetime(df_prices['Date']))
+    .melt(id_vars='Date', var_name='Ticker', value_name='Price')
+    .dropna(subset=['Price'])
+    .sort_values(['Ticker','Date'])
+    .reset_index(drop=True)
+)
+
+# Panel-style MultiIndex (Ticker, Date)
+prices_panel = prices_long.set_index(['Ticker','Date']).sort_index()
+
+print(prices_panel.head())
+
+n_obs = prices_panel.shape[0]
+# n_firms = prices_panel.index.get_level_values('company_id').nunique()
+n_tickers = prices_panel.index.get_level_values('Ticker').nunique()
+n_dates = prices_panel.index.get_level_values('Date').nunique()
+date_min = prices_panel.index.get_level_values('Date').min()
+date_max = prices_panel.index.get_level_values('Date').max()
+
+#print(f"Total observations: {n_obs:,}")
+##print(f"Unique tickers:     {n_tickers}")
+#print(f"Unique dates:       {n_dates}")
+#print(f"Date range:         {date_min.date()} → {date_max.date()}")
+#print(f"Avg. obs per firm:  {n_obs / n_firms:,.0f}")
+
+
 # Data Pre-Processing
-print(df_ff.head())
-print(df_sector.head())
-print(df_prices.head())
+#print(df_ff.head())
+#print(df_sector.head())
+#print(df_prices.head())
 
-df_prices['Date'] = pd.to_datetime(df_prices['Date'])
-df_prices.set_index('Date', inplace=True)
+#df_prices['Date'] = pd.to_datetime(df_prices['Date'])
+#df_prices.set_index('Date', inplace=True)
 
-df_returns = df_prices.pct_change().dropna()
-df_excess_returns = df_returns.subtract(df_ff['RF'], axis=0)
+#df_returns = df_prices.pct_change(fill_method=None).dropna()
+#df_excess_returns = df_returns.subtract(df_ff['RF'], axis=0)
