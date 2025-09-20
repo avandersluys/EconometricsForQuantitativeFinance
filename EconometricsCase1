@@ -27,14 +27,31 @@ prices_long = (
 # Panel-style MultiIndex (Ticker, Date)
 prices_panel = prices_long.set_index(['Ticker','Date']).sort_index()
 
-print(prices_panel.head())
+print(prices_panel.shape)
 
 n_obs = prices_panel.shape[0]
-# n_firms = prices_panel.index.get_level_values('company_id').nunique()
 n_tickers = prices_panel.index.get_level_values('Ticker').nunique()
 n_dates = prices_panel.index.get_level_values('Date').nunique()
 date_min = prices_panel.index.get_level_values('Date').min()
 date_max = prices_panel.index.get_level_values('Date').max()
+
+
+industries_of_interest = ['Basic Materials', 'Communication Services', 'Consumer Cyclical', 'Consumer Defensive']
+tickersOfInterest = df_sector.loc[df_sector['sector'].isin(industries_of_interest), 'Ticker'].tolist()
+#print(tickersOfInterest[:20])
+
+prices_sel = prices_panel[prices_panel.index.get_level_values('Ticker').isin(tickersOfInterest)]
+print(prices_sel.head(10))
+
+
+
+
+#from pathlib import Path
+#Path("outputs").mkdir(exist_ok=True)
+#prices_sel.to_csv("outputs/prices_sel_multiindex.csv")
+
+
+
 
 #print(f"Total observations: {n_obs:,}")
 ##print(f"Unique tickers:     {n_tickers}")
