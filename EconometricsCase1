@@ -119,12 +119,12 @@ panel_data_filtered = panel_data_filtered[
 #panel_data_filtered.to_csv("outputs/panel_data_filtered.csv")
 
 
-print("\nFinal Panel Data Info:")
-print(f"Shape: {panel_data_filtered.shape}")
-print(f"Unique Tickers: {panel_data_filtered.index.get_level_values('Ticker').nunique()}")
-print(f"Unique Dates: {panel_data_filtered.index.get_level_values('Date').nunique()}")
-print(f"Sectors: {sorted(panel_data_filtered['sector'].unique())}")
-print(panel_data_filtered.head(10))
+#print("\nFinal Panel Data Info:")
+#print(f"Shape: {panel_data_filtered.shape}")
+#print(f"Unique Tickers: {panel_data_filtered.index.get_level_values('Ticker').nunique()}")
+#print(f"Unique Dates: {panel_data_filtered.index.get_level_values('Date').nunique()}")
+#print(f"Sectors: {sorted(panel_data_filtered['sector'].unique())}")
+#print(panel_data_filtered.head(10))
 
 # 5. Model Estimation 
 from linearmodels.panel import PanelOLS
@@ -151,18 +151,15 @@ mod1_re = RandomEffects.from_formula(
     data=panel_data_filtered
 )
 res1_re = mod1_re.fit(cov_type='robust')
+print("Random Effects Model (Model 1 - RE):")
+print(res1_re)
 
 # Estimate Fixed Effects model for comparison (already have res1_common)
 print("Comparing Fixed Effects vs Random Effects:")
 
 # Manual Hausman Test Implementation
 def hausman_test(fe_results, re_results):
-    """
-    Hausman test FE vs RE.
-    H0: RE is consistent (no correlation between effects and regressors).
-    Uses V = Var(RE) - Var(FE) and np.linalg.pinv for stability.
-    """
-    keep = ['Mkt-RF', 'SMB', 'HML']  # same regressors in both models
+    keep = ['Mkt-RF', 'SMB', 'HML']  
 
     b_fe = fe_results.params[keep].values
     b_re = re_results.params[keep].values
@@ -171,7 +168,7 @@ def hausman_test(fe_results, re_results):
     V_re = re_results.cov.loc[keep, keep].values
 
     diff = b_fe - b_re
-    V = V_re - V_fe  # IMPORTANT: RE minus FE
+    V = V_re - V_fe  
 
     stat = float(diff.T @ np.linalg.pinv(V) @ diff)
     df = diff.size
@@ -189,7 +186,7 @@ print(f"Test Statistic: {hausman_stat:.4f}")
 print(f"Degrees of Freedom: {hausman_df}")
 print(f"P-value: {hausman_p:.4f}")
 
-
+print("")
 print("Model 2: Sector-Specific Betas")
 
 mod2_sector = PanelOLS.from_formula(
@@ -201,6 +198,7 @@ res2_sector = mod2_sector.fit(cov_type='robust')
 print(res2_sector)
 
 # Difference of Betas Across Sectors
+print("")
 print("Wald test for difference of Betas")
 
 def manual_wald_test(results, param_names_to_test):
@@ -247,28 +245,7 @@ if all_terms:
     stat_all, pval_all = manual_wald_test(res2_sector, all_terms)
     print(f"Overall sector betas joint test: Wald stat = {stat_all:.4f}, p-value = {pval_all:.4f}")
 
-    # Interpretation
-    alpha = 0.05
-    print("\n--- Overall Test Conclusion ---")
-    if pval_all < alpha:
-        print(f"Reject H0: Betas differ across sectors (p-value = {pval_all:.4f} < {alpha})")
-        print("Model 2 (sector-specific betas) preferred.")
-    else:
-        print(f"Fail to reject H0: No strong evidence of beta differences (p-value = {pval_all:.4f} >= {alpha})")
-        print("Model 1 (common beta) might suffice.")
 
 
-print("Sector beta coefficients with 95% CIs:")
-params = res2_sector.params
-conf_int = res2_sector.conf_int()
-sectors = ['Basic Materials', 'Communication Services', 'Consumer Cyclical', 'Consumer Defensive']
 
-for factor in ['Mkt-RF', 'SMB', 'HML']:
-    print(f"\n{factor} Sector Betas:")
-    base_beta = params[factor + ':C(sector)[Basic Materials]']  # Example, adjust for base sector
-    for sector in sectors:
-        key = f"{factor}:C(sector)[{sector}]"
-        if key in params:
-            est = params[key]
-            lower, upper = conf_int.loc[key]
-            print(f"{sector}: Est={est:.5f}, 95% CI=({lower:.5f}, {upper:.5f})")
+
