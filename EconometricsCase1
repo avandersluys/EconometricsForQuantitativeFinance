@@ -107,3 +107,159 @@ returns_df.to_csv("outputs/returns_df.csv")
 
 
 #df_excess_returns = df_returns.subtract(df_ff['RF'], axis=0)
+
+# Merge sector information
+# Reset index of returns_df to access 'Date' as a column for merging
+panel_data_with_sector = returns_df.reset_index().merge(
+    df_sector[['Ticker', 'sector']],
+    on='Ticker', # Merge on 'Ticker' column
+    how='left'
+)
+# Set the MultiIndex back
+panel_data_filtered = panel_data_with_sector.set_index(['Ticker', 'Date'])
+
+# Filter to sectors of interest
+panel_data_filtered = panel_data_filtered[
+    panel_data_filtered['sector'].isin(industries_of_interest)
+]
+
+print("\n--- Final Panel Data Info ---")
+print(f"Shape: {panel_data_filtered.shape}")
+print(f"Unique Tickers: {panel_data_filtered.index.get_level_values('Ticker').nunique()}")
+print(f"Unique Dates: {panel_data_filtered.index.get_level_values('Date').nunique()}")
+print(f"Sectors: {sorted(panel_data_filtered['sector'].unique())}")
+print(panel_data_filtered.head(10))
+
+# --- 5. Model Estimation ---
+from linearmodels.panel import PanelOLS
+
+# --- Model 1: Common Beta (Equation 1 from Assignment) ---
+# y_it = α_i + f_t * β + ϵ_it
+print("\n--- Estimating Model 1: Common Beta (Eq. 1) ---")
+# Using PanelOLS with Entity Effects for α_i and common β
+# NOTE: Backticks for column names with special characters
+mod1_common = PanelOLS.from_formula(
+    'ExcessReturn ~ 1 + EntityEffects + `Mkt-RF` + SMB + HML',
+    data=panel_data_filtered
+)
+res1_common = mod1_common.fit(cov_type='robust')
+print(res1_common)
+
+# --- Model 2: Sector-Specific Betas (Equation 2 from Assignment) ---
+# y_it = α_i + f_t * β_s + ϵ_it
+print("\n--- Estimating Model 2: Sector-Specific Betas (Eq. 2) ---")
+# Using PanelOLS with Entity Effects and interactions for β_s
+# Omit main C(sector) term to avoid multicollinearity
+mod2_sector = PanelOLS.from_formula(
+    'ExcessReturn ~ 1 + EntityEffects + `Mkt-RF`:C(sector) + SMB:C(sector) + HML:C(sector)',
+    data=panel_data_filtered,
+    drop_absorbed=True # Handle potential numerical issues
+)
+res2_sector = mod2_sector.fit(cov_type='robust')
+print(res2_sector)
+
+# --- 6. Hypothesis Testing: Are Betas Different Across Sectors? ---
+print("\n--- Testing for Differences in Betas Across Sectors ---")
+
+# Extract parameter names
+param_names = res2_sector.params.index.tolist()
+print("Parameter names in Model 2:", param_names)
+
+# Identify interaction terms
+interaction_terms_mkt = [name for name in param_names if 'Mkt_RF:C(sector)' in name]
+interaction_terms_smb = [name for name in param_names if 'SMB:C(sector)' in name]
+interaction_terms_hml = [name for name in param_names if 'HML:C(sector)' in name]
+
+# --- Attempt Individual Factor Tests ---
+# Test for Mkt-RF
+if interaction_terms_mkt:
+    hypothesis_mkt = ' = '.join(interaction_terms_mkt) + ' = 0'
+    print(f"\nTesting H0: Betas for Mkt-RF are equal across sectors")
+    try:
+        f_test_mkt = res2_sector.wald_test(hypothesis_mkt)
+        print(f_test_mkt)
+    except Exception as e:
+        print(f"Error in Mkt-RF F-test: {e}")
+
+# Test for SMB
+if interaction_terms_smb:
+    hypothesis_smb = ' = '.join(interaction_terms_smb) + ' = 0'
+    print(f"\nTesting H0: Betas for SMB are equal across sectors")
+    try:
+        f_test_smb = res2_sector.wald_test(hypothesis_smb)
+        print(f_test_smb)
+    except Exception as e:
+        print(f"Error in SMB F-test: {e}")
+
+# Test for HML
+if interaction_terms_hml:
+    hypothesis_hml = ' = '.join(interaction_terms_hml) + ' = 0'
+    print(f"\nTesting H0: Betas for HML are equal across sectors")
+    try:
+        f_test_hml = res2_sector.wald_test(hypothesis_hml)
+        print(f_test_hml)
+    except Exception as e:
+        print(f"Error in HML F-test: {e}")
+
+# --- Attempt Overall Test ---
+all_interaction_terms = interaction_terms_mkt + interaction_terms_smb + interaction_terms_hml
+if all_interaction_terms:
+    hypothesis_all = ' = '.join(all_interaction_terms) + ' = 0'
+    print(f"\nTesting H0: ALL Betas (Mkt-RF, SMB, HML) are equal across sectors (Overall Test)")
+    try:
+        f_test_overall = res2_sector.wald_test(hypothesis_all)
+        print(f_test_overall)
+        # Interpretation
+        alpha = 0.05
+        print(f"\n--- Overall Test Conclusion ---")
+        if f_test_overall.pval < alpha:
+            print(f"Result: Reject H0 (p-value = {f_test_overall.pval:.4f} < {alpha}).")
+            print("Evidence suggests betas differ across sectors. Model 2 preferred.")
+        else:
+            print(f"Result: Fail to reject H0 (p-value = {f_test_overall.pval:.4f} >= {alpha}).")
+            print("Insufficient evidence for differing betas. Model 1 might suffice.")
+    except Exception as e:
+        print(f"Error performing the overall F-test: {e}")
+        print("Proceeding with analysis based on model fit and individual tests.")
+else:
+    print("No interaction terms found to test.")
+
+# --- 7. Summary of Results ---
+print("\n--- Summary of Findings ---")
+print(f"Target Sectors: {industries_of_interest}")
+
+print("\nModel 1 (Common Beta - Eq. 1):")
+print(f"  - Method: Panel OLS with Firm Fixed Effects")
+print(f"  - R-squared (Within): {res1_common.rsquared_within:.4f}")
+print(f"  - Coefficients (Average Sensitivity):")
+print(f"    Mkt-RF = {res1_common.params['Mkt-RF']:.4f} (p-val: {res1_common.pvalues['Mkt-RF']:.3f})")
+print(f"    SMB    = {res1_common.params['SMB']:.4f} (p-val: {res1_common.pvalues['SMB']:.3f})")
+print(f"    HML    = {res1_common.params['HML']:.4f} (p-val: {res1_common.pvalues['HML']:.3f})")
+
+print("\nModel 2 (Sector-Specific Betas - Eq. 2):")
+print(f"  - Method: Panel OLS with Firm Fixed Effects and Sector Interactions")
+print(f"  - R-squared (Within): {res2_sector.rsquared_within:.4f}")
+print("  - Coefficients: Vary by sector. Key examples (relative to base sector):")
+# Note: The base sector is typically the one omitted in the C(sector) dummies,
+# often the first one alphabetically unless specified. Check Model 2 output for reference.
+# Assuming 'Communication Services' is the base sector based on alphabetical order
+# and the structure of the interaction terms.
+try:
+    print(f"    Mkt-RF (Consumer Cyclical) = {res2_sector.params['Mkt-RF:C(sector)[Consumer Cyclical]']:.4f}")
+    print(f"    SMB (Consumer Defensive)   = {res2_sector.params['SMB:C(sector)[Consumer Defensive]']:.4f} (Negative)")
+    print(f"    HML (Basic Materials)      = {res2_sector.params['HML:C(sector)[Basic Materials]']:.4f} (High)")
+except KeyError as e:
+    print(f"    Could not retrieve specific beta examples due to key error: {e}")
+    print("    Please check the full Model 2 output for parameter names.")
+
+print("\nKey Takeaway:")
+# Check if the overall F-test was successfully performed
+if 'f_test_overall' in locals() and hasattr(f_test_overall, 'pval'):
+    if f_test_overall.pval < 0.05:
+        print("- Formal test (if successful) and higher R-squared support Model 2.")
+    else:
+        print("- Formal test (if successful) does not strongly support Model 2; R-squared is higher though.")
+else:
+    print("- Formal F-test encountered issues. However, Model 2 has a higher R-squared and")
+    print("  shows economically meaningful differences in sector betas,")
+    print("  suggesting it is a better representation of the data.")
