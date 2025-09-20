@@ -6,7 +6,7 @@ import numpy as np
 import statsmodels.api as sm
 import matplotlib.pyplot as plt
 
-#Datat
+#Data
 
 # Set relative path to data folder
 DATA_FOLDER = '/Users/siddharth/Documents/GitHub/EconometricsForQuantitativeFinance'
@@ -23,3 +23,7 @@ print(df_prices.head())
 
 df_prices['Date'] = pd.to_datetime(df_prices['Date'])
 df_prices.set_index('Date', inplace=True)
+
+df_returns = df_prices.pct_change().dropna()
+df_excess_returns = df_returns.subtract(df_ff['RF'], axis=0)
+
