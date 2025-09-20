@@ -9,6 +9,7 @@ from pathlib import Path
 import warnings
 from scipy.stats import chi2  # for hausman test
 from linearmodels.panel import RandomEffects
+from linearmodels.panel import PanelOLS
 
 warnings.filterwarnings(
     "ignore",
@@ -98,7 +99,7 @@ print(f"Sectors: {sorted(panel_data_filtered['sector'].unique())}")
 print(panel_data_filtered.head(10))
 
 # 5. Model Estimation 
-from linearmodels.panel import PanelOLS
+
 
 # Model 1: Common Beta 
 print("")
