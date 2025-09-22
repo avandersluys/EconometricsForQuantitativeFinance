@@ -111,37 +111,28 @@ mod1_common = PanelOLS.from_formula(
     data=panel_data_filtered
 )
 # Clustered (by entity) SEs
+# FE fit (as you have)
 res1_common = mod1_common.fit(cov_type='clustered', cluster_entity=True)
 print(res1_common)
 
+# --- Dry diagnostics: within-firm lag-1 autocorrelation & cross-firm heteroskedasticity ---
+from statsmodels.stats.diagnostic import acorr_ljungbox  # (not used below, but handy if you want)
+from scipy.stats import levene
 
-def median_lag1_acf_by_entity(residuals):
-    vals = []
-    for tkr, grp in residuals.groupby(level='Ticker'):
-        g = grp.sort_index(level='Date').values
-        if len(g) > 5:
-            try:
-                a = acf(g, nlags=1, fft=False)
-                vals.append(a[1])  # lag-1 autocorrelation
-            except Exception:
-                pass
-    return np.nan if not vals else float(np.nanmedian(vals))
+# Put residuals in a flat DataFrame
+fe_resid = res1_common.resids.rename('e').reset_index()  # columns: Ticker, Date, e
+fe_resid = fe_resid.sort_values(['Ticker','Date'])
 
-fe_resid = res1_common.resids  # MultiIndex (Ticker, Date) Series
-lag1_med = median_lag1_acf_by_entity(fe_resid)
+# 1) Within-firm serial dependence: lag-1 autocorrelation per firm, then median
+acf1_by_firm = fe_resid.groupby('Ticker')['e'].apply(lambda s: s.autocorr(lag=1))
+lag1_med = float(acf1_by_firm.median(skipna=True))
 print(f"\n[Diag] Within-firm serial dependence: median lag-1 ACF = {lag1_med:.3f}")
 
-groups = []
-for tkr, grp in fe_resid.groupby(level='Ticker'):
-    g = grp.values
-    if len(g) >= 20:
-        groups.append(g[:200])   # cap so a few very long series don't dominate
+# 2) Cross-firm heteroskedasticity: Levene across firms (center='median')
+groups = [g['e'].values for _, g in fe_resid.groupby('Ticker')]
+W, p = levene(*groups, center='median')
+print(f"[Diag] Cross-firm heteroskedasticity (Levene, median): W={W:.2f}, p={p:.4f}")
 
-if len(groups) >= 2:
-    W, p = levene(*groups, center='median')
-    print(f"[Diag] Cross-firm heteroskedasticity (Levene, median): W={W:.2f}, p={p:.4f}")
-else:
-    print("[Diag] Levene test skipped: not enough firms with ≥20 residuals.")
 
 # Hausman Test
 print("\nHausman Test: Fixed Effects vs Random Effects:")
