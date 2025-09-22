@@ -10,6 +10,8 @@ import warnings
 from scipy.stats import chi2  # for hausman test
 from linearmodels.panel import RandomEffects
 from linearmodels.panel import PanelOLS
+from statsmodels.tsa.stattools import acf
+from scipy.stats import levene
 
 warnings.filterwarnings(
     "ignore",
@@ -111,6 +113,35 @@ mod1_common = PanelOLS.from_formula(
 # Clustered (by entity) SEs
 res1_common = mod1_common.fit(cov_type='clustered', cluster_entity=True)
 print(res1_common)
+
+
+def median_lag1_acf_by_entity(residuals):
+    vals = []
+    for tkr, grp in residuals.groupby(level='Ticker'):
+        g = grp.sort_index(level='Date').values
+        if len(g) > 5:
+            try:
+                a = acf(g, nlags=1, fft=False)
+                vals.append(a[1])  # lag-1 autocorrelation
+            except Exception:
+                pass
+    return np.nan if not vals else float(np.nanmedian(vals))
+
+fe_resid = res1_common.resids  # MultiIndex (Ticker, Date) Series
+lag1_med = median_lag1_acf_by_entity(fe_resid)
+print(f"\n[Diag] Within-firm serial dependence: median lag-1 ACF = {lag1_med:.3f}")
+
+groups = []
+for tkr, grp in fe_resid.groupby(level='Ticker'):
+    g = grp.values
+    if len(g) >= 20:
+        groups.append(g[:200])   # cap so a few very long series don't dominate
+
+if len(groups) >= 2:
+    W, p = levene(*groups, center='median')
+    print(f"[Diag] Cross-firm heteroskedasticity (Levene, median): W={W:.2f}, p={p:.4f}")
+else:
+    print("[Diag] Levene test skipped: not enough firms with ≥20 residuals.")
 
 # Hausman Test
 print("\nHausman Test: Fixed Effects vs Random Effects:")
@@ -287,9 +318,8 @@ for factor in ['Mkt-RF', 'SMB', 'HML']:
             lower, upper = conf_int.loc[key]
             print(f"{sector}: Est={est:.5f}, 95% CI=({lower:.5f}, {upper:.5f})")
 
-#Graphs 
 
-# --- Generate Professional Graphs ---
+#Generate seaborn graphs
 import matplotlib.pyplot as plt
 import seaborn as sns
 
