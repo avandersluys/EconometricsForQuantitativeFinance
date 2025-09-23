@@ -370,14 +370,28 @@ sns.set_palette("Set2")
 
 # 1. Sector Beta Comparison Plot
 def plot_sector_betas():
-    """Create bar plot comparing sector-specific betas"""
-    
-    # Data from your results
-    sectors = ['Basic\nMaterials', 'Communication\nServices', 'Consumer\nCyclical', 'Consumer\nDefensive']
-    mkt_betas = [1.036, 0.952, 1.045, 0.586]
-    smb_betas = [0.219, 0.157, 0.337, -0.191]
-    hml_betas = [0.461, 0.011, 0.180, 0.142]
-    
+    "Create bar plot comparing sector-specific betas"
+    sectors = ['Basic\nMaterials','Communication\nServices','Consumer\nCyclical','Consumer\nDefensive']
+    sector_keys = ['Basic Materials','Communication Services','Consumer Cyclical','Consumer Defensive']
+
+    # ✅ read from FE results
+    params   = res2_fe.params
+    conf_int = res2_fe.conf_int()
+
+    def betas_for(factor):
+        return [params.get(f"{factor}:C(sector)[{s}]", np.nan) for s in sector_keys]
+
+    mkt_betas = betas_for('Mkt-RF')
+    smb_betas = betas_for('SMB')
+    hml_betas = betas_for('HML')
+
+    # (optional) 95% CI error bars
+    def ci_for(factor):
+        lows  = [conf_int.loc[f"{factor}:C(sector)[{s}]", 0] for s in sector_keys]
+        highs = [conf_int.loc[f"{factor}:C(sector)[{s}]", 1] for s in sector_keys]
+        return lows, highs
+
+    # plotting code unchanged…
     x = np.arange(len(sectors))
     width = 0.25
     
