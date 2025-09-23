@@ -308,7 +308,7 @@ def wald_overall(results, factors, sectors, base_sector):
     p_value = 1 - chi2.cdf(stat, df)
     return stat, p_value, df
 
-stat_all, pval_all, df_all = wald_overall(res2_re, ['Mkt-RF','SMB','HML'], sectors, base_sector)
+stat_all, pval_all, df_all = wald_overall(res2_fe, ['Mkt-RF','SMB','HML'], sectors, base_sector)
 if df_all > 0:
     print(f"Overall sector betas equality (all factors, vs {base_sector}): Wald stat = {stat_all:.4f}, df = {df_all}, p-value = {pval_all:.4f}")
 
