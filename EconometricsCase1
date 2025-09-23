@@ -38,14 +38,9 @@ warnings.filterwarnings(
     module=r"linearmodels\.panel\..*"
 )
 
-# Base URL for raw GitHub repo
+# Base URL for raw GitHub repo (public repo so should work for anyone)
 BASE_URL = "https://raw.githubusercontent.com/avandersluys/EconometricsForQuantitativeFinance/main"
 
-def adj_within_r2(res):
-    r2 = float(res.rsquared)
-    n = float(res.df_resid + res.df_model)   # total obs used
-    k = float(res.df_model)                  # number of slope coefficients
-    return 1.0 - (1.0 - r2) * ((n - 1.0) / (n - k - 1.0))
 
 
 # Loading datasets directly from GitHub
@@ -148,16 +143,21 @@ print(panel_data_filtered.head(10))
 
 # 5. Model Estimation 
 
+def adj_within_r2(res):
+    r2 = float(res.rsquared)
+    n = float(res.df_resid + res.df_model)  
+    k = float(res.df_model)                  
+    return 1.0 - (1.0 - r2) * ((n - 1.0) / (n - k - 1.0))
+
 # Model 1: Common Beta 
 print("")
 print("Estimating Common Beta Model:")
-# Entity fixed effects for α_i and common β (no extra intercept; absorbed by EntityEffects)
+# Entity fixed effects 
 mod1_common = PanelOLS.from_formula(
     'ExcessReturn ~ EntityEffects + `Mkt-RF` + SMB + HML',
     data=panel_data_filtered
 )
 # Clustered (by entity) SEs
-# FE fit (as you have)
 res1_common = mod1_common.fit(cov_type='clustered', cluster_entity=True)
 print(res1_common)
 
@@ -186,17 +186,13 @@ mod1_re = RandomEffects.from_formula(
 res1_re = mod1_re.fit(cov_type='clustered', cluster_entity=True)
 print(res1_re)
 
-# Estimate Fixed Effects model for comparison (already have res1_common)
+# Estimate Fixed Effects model for comparison 
 print("Comparing Fixed Effects vs Random Effects:")
 
 # Manual Hausman Test Implementation
 def hausman_test(fe_results, re_results):
-    """
-    Hausman test FE vs RE.
-    H0: RE is consistent (no correlation between effects and regressors).
-    Uses V = Var(FE) - Var(RE) and np.linalg.pinv for stability.
-    """
-    keep = ['Mkt-RF', 'SMB', 'HML']  # same regressors in both models
+
+    keep = ['Mkt-RF', 'SMB', 'HML']  
 
     b_fe = fe_results.params[keep].values
     b_re = re_results.params[keep].values
@@ -205,7 +201,7 @@ def hausman_test(fe_results, re_results):
     V_re = re_results.cov.loc[keep, keep].values
 
     diff = b_fe - b_re
-    V = V_fe - V_re  # FE minus RE (as in slides)
+    V = V_fe - V_re  
 
     stat = float(diff.T @ np.linalg.pinv(V) @ diff)
     df = diff.size
@@ -234,9 +230,6 @@ print("[Model 2 FE] R² adj (within):",    round(adj_within_r2(res2_fe), 6))
 print("[Model 2 FE] R² (between):",       round(res2_fe.rsquared_between, 6))
 print("[Model 2 FE] R² (overall):",       round(res2_fe.rsquared_overall, 6))
 
-
-
-
 mod2_re = RandomEffects.from_formula(
     'ExcessReturn ~ 1 + `Mkt-RF`:C(sector) + SMB:C(sector) + HML:C(sector)',
     data=panel_data_filtered
@@ -248,15 +241,9 @@ print(res2_re)
 # Difference of Betas Across Sectors
 print("Wald test for difference of Betas")
 
-
-
-
-# Build and test linear contrasts: for each factor, test equality across sectors vs a base sector
+# wald tests per factor againsty base sector
 def wald_equal_across_sectors(results, factor_name, sectors, base_sector):
-    """
-    H0: beta_factor[sector] - beta_factor[base_sector] = 0 for all sectors != base
-    Uses Moore-Penrose pseudo-inverse for stability.
-    """
+
     param_names = results.params.index.to_list()
     term_prefix = f"{factor_name}:C(sector)"
     keys = {s: f"{term_prefix}[{s}]" for s in sectors if f"{term_prefix}[{s}]" in param_names}
@@ -302,7 +289,7 @@ stat_hml, pval_hml, df_hml = wald_equal_across_sectors(res2_re, 'HML', sectors, 
 if df_hml > 0:
     print(f"HML sector betas equality (vs {base_sector}): Wald stat = {stat_hml:.4f}, df = {df_hml}, p-value = {pval_hml:.4f}")
 
-# Overall joint test for all sector-specific betas together (all factors, all sectors vs base)
+# wald test for overall equality across factors
 def wald_overall(results, factors, sectors, base_sector):
     param_names = results.params.index.to_list()
     p = len(param_names)
@@ -335,16 +322,8 @@ stat_all, pval_all, df_all = wald_overall(res2_fe, ['Mkt-RF','SMB','HML'], secto
 if df_all > 0:
     print(f"Overall sector betas equality (all factors, vs {base_sector}): Wald stat = {stat_all:.4f}, df = {df_all}, p-value = {pval_all:.4f}")
 
-    # Interpretation
-    alpha = 0.05
-    print("\n--- Overall Test Conclusion ---")
-    if pval_all < alpha:
-        print(f"Reject H0: Betas differ across sectors (p-value = {pval_all:.4f} < {alpha})")
-        print("Model 2 (sector-specific betas) preferred.")
-    else:
-        print(f"Fail to reject H0: No strong evidence of beta differences (p-value = {pval_all:.4f} >= {alpha})")
-        print("Model 1 (common beta) might suffice.")
 
+print("")
 print("Sector beta coefficients with 95% CIs:")
 params = res2_re.params
 conf_int = res2_re.conf_int()
@@ -360,21 +339,17 @@ for factor in ['Mkt-RF', 'SMB', 'HML']:
             print(f"{sector}: Est={est:.5f}, 95% CI=({lower:.5f}, {upper:.5f})")
 
 
-#Generate seaborn graphs
-import matplotlib.pyplot as plt
-import seaborn as sns
+#graphs
 
-# Set style for professional plots
+import seaborn as sns
 plt.style.use('seaborn-v0_8-whitegrid')
 sns.set_palette("Set2")
 
-# 1. Sector Beta Comparison Plot
+#Sector Beta Comparison Plot
 def plot_sector_betas():
-    "Create bar plot comparing sector-specific betas"
     sectors = ['Basic\nMaterials','Communication\nServices','Consumer\nCyclical','Consumer\nDefensive']
     sector_keys = ['Basic Materials','Communication Services','Consumer Cyclical','Consumer Defensive']
 
-    # ✅ read from FE results
     params   = res2_fe.params
     conf_int = res2_fe.conf_int()
 
@@ -385,13 +360,11 @@ def plot_sector_betas():
     smb_betas = betas_for('SMB')
     hml_betas = betas_for('HML')
 
-    # (optional) 95% CI error bars
     def ci_for(factor):
         lows  = [conf_int.loc[f"{factor}:C(sector)[{s}]", 0] for s in sector_keys]
         highs = [conf_int.loc[f"{factor}:C(sector)[{s}]", 1] for s in sector_keys]
         return lows, highs
 
-    # plotting code unchanged…
     x = np.arange(len(sectors))
     width = 0.25
     
@@ -409,7 +382,6 @@ def plot_sector_betas():
     ax.legend(fontsize=11)
     ax.grid(True, alpha=0.3)
     
-    # Add value labels on bars
     def add_value_labels(bars):
         for bar in bars:
             height = bar.get_height()
