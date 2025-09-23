@@ -81,6 +81,7 @@ df_returns = prices_sel.pct_change(fill_method=None).dropna()
 df_ff['Date'] = pd.to_datetime(df_ff['Date'])
 rf = df_ff.set_index('Date')['RF']          
 
+
 returns_df = (
     prices_sel
     .groupby(level='Ticker')           
@@ -113,6 +114,25 @@ panel_data_with_sector = returns_df.reset_index().merge(
 )
 
 panel_data_filtered = panel_data_with_sector.set_index(['Ticker', 'Date'])
+
+# Print sample composition info
+g = panel_data_filtered.reset_index().groupby('sector')
+
+sector_counts = g['Ticker'].nunique().rename('n_firms')
+sector_obs    = g.size().rename('n_obs')
+
+
+T_per_firm = panel_data_filtered.reset_index().groupby(['sector','Ticker']).size()
+sector_Tmin = T_per_firm.groupby('sector').min().rename('T_min')
+sector_Tmax = T_per_firm.groupby('sector').max().rename('T_max')
+
+comp = pd.concat([sector_counts, sector_obs, sector_Tmin, sector_Tmax], axis=1).reset_index()
+print(comp)
+print("TOTAL firms:", panel_data_filtered.index.get_level_values('Ticker').nunique())
+print("TOTAL obs:", len(panel_data_filtered))
+print("Min T_i:", int(T_per_firm.min()), "Max T_i:", int(T_per_firm.max()),
+      "Mean T_i:", round(T_per_firm.mean(), 1))
+
 
 # Filter to sectors of interest
 panel_data_filtered = panel_data_filtered[
@@ -227,6 +247,9 @@ print(res2_re)
 
 # Difference of Betas Across Sectors
 print("Wald test for difference of Betas")
+
+
+
 
 # Build and test linear contrasts: for each factor, test equality across sectors vs a base sector
 def wald_equal_across_sectors(results, factor_name, sectors, base_sector):
@@ -389,3 +412,5 @@ def plot_sector_betas():
     plt.show()
 
 plot_sector_betas()
+
+
