@@ -101,7 +101,7 @@ def adj_within_r2(res):
     k = float(res.df_model)                  
     return 1.0 - (1.0 - r2) * ((n - 1.0) / (n - k - 1.0))
 
-# Manual Hausman Test Implementation
+# Hausman Test Implementation
 def hausman_test(fe_results, re_results):
 
     keep = ['Mkt-RF', 'SMB', 'HML']  
@@ -120,15 +120,16 @@ def hausman_test(fe_results, re_results):
     p = 1 - chi2.cdf(stat, df)
     return stat, p, df
 
-# wald tests per factor against base sector
+# Wald test: per-factor equality vs base sector
 def wald_equal_across_sectors(results, factor_name, sectors, base_sector):
-
+     # We use one factor (Mkt-RF, SMB, or HML)
     param_names = results.params.index.to_list()
     term_prefix = f"{factor_name}:C(sector)"
     keys = {s: f"{term_prefix}[{s}]" for s in sectors if f"{term_prefix}[{s}]" in param_names}
     if base_sector not in keys or len(keys) <= 1:
         return np.nan, np.nan, 0
 
+    # Construction of R to test each sector beta equals the base beta (beta,s - beta_base = 0)
     p = len(param_names)
     rows = []
     for s, k in keys.items():
@@ -138,11 +139,11 @@ def wald_equal_across_sectors(results, factor_name, sectors, base_sector):
         r[param_names.index(k)] = 1.0
         r[param_names.index(keys[base_sector])] = -1.0
         rows.append(r)
-
     if not rows:
         return np.nan, np.nan, 0
-
     R = np.vstack(rows)
+
+    # compututation Wald statistic with robust covar
     beta_hat = results.params.values
     cov_beta = results.cov.values
     diff = R @ beta_hat
@@ -150,12 +151,18 @@ def wald_equal_across_sectors(results, factor_name, sectors, base_sector):
     stat = float(diff.T @ np.linalg.pinv(var_diff) @ diff)
     df = R.shape[0]
     p_value = 1 - chi2.cdf(stat, df)
+
+    # X^2 stat, p-val, and dof 
     return stat, p_value, df
 
-# wald test for overall equality across factors
+
+# Wald test: overall equality across listed factors vs base sector
 def wald_overall(results, factors, sectors, base_sector):
+    # Here we use all factors
     param_names = results.params.index.to_list()
     p = len(param_names)
+
+    # Construction of  R to test, for all factors f if sector beta equals base beta
     rows = []
     for f in factors:
         term_prefix = f"{f}:C(sector)"
@@ -172,6 +179,8 @@ def wald_overall(results, factors, sectors, base_sector):
     if not rows:
         return np.nan, np.nan, 0
     R = np.vstack(rows)
+
+    # compututation Wald statistic with robust covar
     beta_hat = results.params.values
     cov_beta = results.cov.values
     diff = R @ beta_hat
@@ -179,7 +188,10 @@ def wald_overall(results, factors, sectors, base_sector):
     stat = float(diff.T @ np.linalg.pinv(var_diff) @ diff)
     df = R.shape[0]
     p_value = 1 - chi2.cdf(stat, df)
+
+    # X^2 stat, p-val, and dof
     return stat, p_value, df
+
 
 # Loading datasets directly from GitHub
 df_ff = pd.read_csv(f"{BASE_URL}/capmff_2010-2025_ff.csv")
