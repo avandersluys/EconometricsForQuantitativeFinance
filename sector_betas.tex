@@ -1,0 +1,131 @@
+% This file was created with tikzplotlib v0.10.1.
+\begin{tikzpicture}
+
+\definecolor{darkgray141160203}{RGB}{141,160,203}
+\definecolor{darkslategray38}{RGB}{38,38,38}
+\definecolor{lightgray204}{RGB}{204,204,204}
+\definecolor{mediumaquamarine102194165}{RGB}{102,194,165}
+\definecolor{salmon25214198}{RGB}{252,141,98}
+
+\begin{axis}[
+axis line style={lightgray204},
+height=0.6\linewidth,
+legend cell align={left},
+legend style={fill opacity=0.8, draw opacity=1, text opacity=1, draw=none},
+tick align=outside,
+tick pos=left,
+title={Sector-Specific Fama-French Factor Loadings},
+width=\linewidth,
+x grid style={lightgray204},
+xlabel=\textcolor{darkslategray38}{Sector},
+xmajorgrids,
+xmin=-0.5625, xmax=3.5625,
+xtick style={color=darkslategray38},
+xtick={0,1,2,3},
+xticklabels={Basic
+Materials,Communication
+Services,Consumer
+Cyclical,Consumer
+Defensive},
+y grid style={lightgray204},
+ylabel=\textcolor{darkslategray38}{Factor Loading (Beta)},
+ymajorgrids,
+ymin=-0.253143766378988, ymax=1.10672772636489,
+ytick style={color=darkslategray38}
+]
+\draw[draw=none,fill=mediumaquamarine102194165,fill opacity=0.8] (axis cs:-0.375,0) rectangle (axis cs:-0.125,1.03556598776363);
+\addlegendimage{ybar,ybar legend,draw=none,fill=mediumaquamarine102194165,fill opacity=0.8}
+\addlegendentry{Market (Mkt-RF)}
+
+\draw[draw=none,fill=mediumaquamarine102194165,fill opacity=0.8] (axis cs:0.625,0) rectangle (axis cs:0.875,0.952071308523647);
+\draw[draw=none,fill=mediumaquamarine102194165,fill opacity=0.8] (axis cs:1.625,0) rectangle (axis cs:1.875,1.04491538578562);
+\draw[draw=none,fill=mediumaquamarine102194165,fill opacity=0.8] (axis cs:2.625,0) rectangle (axis cs:2.875,0.585788207020559);
+\draw[draw=none,fill=salmon25214198,fill opacity=0.8] (axis cs:-0.125,0) rectangle (axis cs:0.125,0.219159327987543);
+\addlegendimage{ybar,ybar legend,draw=none,fill=salmon25214198,fill opacity=0.8}
+\addlegendentry{Size (SMB)}
+
+\draw[draw=none,fill=salmon25214198,fill opacity=0.8] (axis cs:0.875,0) rectangle (axis cs:1.125,0.156638425442195);
+\draw[draw=none,fill=salmon25214198,fill opacity=0.8] (axis cs:1.875,0) rectangle (axis cs:2.125,0.337197482407047);
+\draw[draw=none,fill=salmon25214198,fill opacity=0.8] (axis cs:2.875,0) rectangle (axis cs:3.125,-0.191331425799721);
+\draw[draw=none,fill=darkgray141160203,fill opacity=0.8] (axis cs:0.125,0) rectangle (axis cs:0.375,0.461181699772893);
+\addlegendimage{ybar,ybar legend,draw=none,fill=darkgray141160203,fill opacity=0.8}
+\addlegendentry{Value (HML)}
+
+\draw[draw=none,fill=darkgray141160203,fill opacity=0.8] (axis cs:1.125,0) rectangle (axis cs:1.375,0.0109961444293278);
+\draw[draw=none,fill=darkgray141160203,fill opacity=0.8] (axis cs:2.125,0) rectangle (axis cs:2.375,0.180124268420164);
+\draw[draw=none,fill=darkgray141160203,fill opacity=0.8] (axis cs:3.125,0) rectangle (axis cs:3.375,0.141727180540057);
+\draw (axis cs:-0.25,1.04556598776363) node[
+  scale=0.45,
+  anchor=south,
+  text=darkslategray38,
+  rotate=0.0
+]{1.036};
+\draw (axis cs:0.75,0.962071308523647) node[
+  scale=0.45,
+  anchor=south,
+  text=darkslategray38,
+  rotate=0.0
+]{0.952};
+\draw (axis cs:1.75,1.05491538578562) node[
+  scale=0.45,
+  anchor=south,
+  text=darkslategray38,
+  rotate=0.0
+]{1.045};
+\draw (axis cs:2.75,0.595788207020559) node[
+  scale=0.45,
+  anchor=south,
+  text=darkslategray38,
+  rotate=0.0
+]{0.586};
+\draw (axis cs:0,0.229159327987543) node[
+  scale=0.45,
+  anchor=south,
+  text=darkslategray38,
+  rotate=0.0
+]{0.219};
+\draw (axis cs:1,0.166638425442195) node[
+  scale=0.45,
+  anchor=south,
+  text=darkslategray38,
+  rotate=0.0
+]{0.157};
+\draw (axis cs:2,0.347197482407047) node[
+  scale=0.45,
+  anchor=south,
+  text=darkslategray38,
+  rotate=0.0
+]{0.337};
+\draw (axis cs:3,-0.221331425799721) node[
+  scale=0.45,
+  anchor=north,
+  text=darkslategray38,
+  rotate=0.0
+]{-0.191};
+\draw (axis cs:0.25,0.471181699772893) node[
+  scale=0.45,
+  anchor=south,
+  text=darkslategray38,
+  rotate=0.0
+]{0.461};
+\draw (axis cs:1.25,0.0209961444293278) node[
+  scale=0.45,
+  anchor=south,
+  text=darkslategray38,
+  rotate=0.0
+]{0.011};
+\draw (axis cs:2.25,0.190124268420164) node[
+  scale=0.45,
+  anchor=south,
+  text=darkslategray38,
+  rotate=0.0
+]{0.180};
+\draw (axis cs:3.25,0.151727180540057) node[
+  scale=0.45,
+  anchor=south,
+  text=darkslategray38,
+  rotate=0.0
+]{0.142};
+\end{axis}
+
+\end{tikzpicture}
