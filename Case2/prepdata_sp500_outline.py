@@ -34,7 +34,8 @@ def PrepSPY(dtArg):
     Return value:
         df      dataframe, prices
     """
-    sGlob = f'/Users/siddharth/Documents/GitHub/EconometricsForQuantitativeFinance/Case2/data/Price*_all_*_i0.xlsx'
+    path='/Users/siddharth/Documents/GitHub/EconometricsForQuantitativeFinance/Case2'
+    sGlob = f'{path}/data/Price*_all_*_i0.xlsx'
     asF = np.sort(glob.glob(sGlob))
 
     # Read the data, best to limit to only the symbols of interest
