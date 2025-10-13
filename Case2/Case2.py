@@ -56,16 +56,23 @@ if len(missing_periods) > 0:
     missing_df = pd.DataFrame({'datetime': missing_periods})
     missing_df['date'] = missing_df['datetime'].dt.date
     missing_by_date = missing_df.groupby('date').size()
-    
     for date, count in missing_by_date.items():
         print(f"  {date}: {count} missing observations")
 
 # Market structure validation
 returns_spy5p = np.log(spy5p_series / spy5p_series.shift(1)).dropna()
 print(f"\nTrading hours coverage:")
-hourly_coverage = returns_spy5p.groupby(returns_spy5p.index.hour).size()
+hourly_coverage = returns_spy5p.groupby(returns_spy5p.index.hour).size().sort_index()
+
 for hour, count in hourly_coverage.items():
-    print(f"  {hour:02d}:00 - {count:,} observations")
+    if hour == 17:
+        # last bucket is only a half hour
+        print(f"  17:00-17:30 - {count:,} observations")
+    else:
+        end_hour = (hour + 1) % 24
+        print(f"  {hour:02d}:00-{end_hour:02d}:00 - {count:,} observations")
+
+
 
 # ARMA Data Preparation
 arma_data = returns_spy5p.dropna()
@@ -358,3 +365,5 @@ print(f"  R-squared: {reg.score(X_test, y_test):.6f}")
 
 print(f"\nARMA(5,5) out-sample MSE: {results_dict['ARMA(5,5)']['mse_out']:.2e}")
 print(f"MSE ratio (sparse/ARMA): {mse_sparse / results_dict['ARMA(5,5)']['mse_out']:.3f}")
+
+print(" === Question 3.3 ===")
