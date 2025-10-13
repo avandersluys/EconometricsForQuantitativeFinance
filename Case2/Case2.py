@@ -448,9 +448,136 @@ if all_converged:
     print(f"MSE ratio (sparse/best ARMA): {mse_sparse / best_arma_mse:.3f}")
 
 
-###########################################################
-### 3.4
-print(" === Question 3.3 ===")
+############################################################## 3.3
+print("\n=== QUESTION 3.3a — VAR(5) on returns ===")
+
+from statsmodels.tsa.api import VAR
+from statsmodels.stats.diagnostic import acorr_ljungbox
+
+# ---------- Pick two parallel listings of the *same* ETF ----------
+symbols_var = ['SPY5.P', 'SPY5z.CHIX']  # keep it bivariate for clarity/robustness
+prices = df[symbols_var]
+
+# ---------- Minute log-returns (I(0)) ----------
+logP = np.log(prices)
+R = logP.diff().dropna()
+
+# Align with your existing split
+R_in  = R[R.index < split_date]
+R_out = R[R.index >= split_date]
+
+print(f"Series in VAR: {symbols_var}")
+print(f"In-sample:  {R_in.index[0]}  →  {R_in.index[-1]}  (n={len(R_in):,})")
+print(f"Out-sample: {R_out.index[0]} →  {R_out.index[-1]} (n={len(R_out):,})")
+
+# ---------- Fit reduced-form VAR(5) ----------
+p = 5
+var_model = VAR(R_in)
+var_res = var_model.fit(maxlags=p, ic=None, trend='c')  # constant term
+
+print("\nVAR(5) summary:")
+print(var_res.summary())
+
+# ---------- Fit statistics & residual diagnostics ----------
+print("\nVAR(5) fit stats:")
+print(f"  LLF: {var_res.llf:.2f}")
+print(f"  AIC: {var_res.aic:.6f} | BIC: {var_res.bic:.6f}")
+
+# In-sample MSE by series
+resid = var_res.resid
+mse_in = (resid**2).mean()
+print("\nIn-sample MSE by series:")
+for s in resid.columns:
+    print(f"  {s}: {mse_in[s]:.4e}")
+
+# Ljung–Box up to lag 10 per equation
+print("\nResidual Ljung–Box (lag 10):")
+for s in resid.columns:
+    lb = acorr_ljungbox(resid[s], lags=[10], return_df=True)
+    print(f"  {s}: Q={lb['lb_stat'].iloc[-1]:.2f}, p={lb['lb_pvalue'].iloc[-1]:.3f}")
+
+# Residual contemporaneous correlation
+print("\nResidual correlation matrix:")
+print(resid.corr())
+
+# ---------- Fast rolling 1-step OOS forecast (no refit each step) ----------
+if len(R_out) > 0:
+    try:
+        p = 5  # same lag as your VAR(5)
+        var_model = VAR(R_in)
+        var_res = var_model.fit(maxlags=p, ic=None, trend='c')  # fit ONCE
+
+        history = R_in.copy()
+        preds = np.empty((len(R_out), R_out.shape[1]))
+        for t in range(len(R_out)):
+            # 1-step forecast with fixed parameters using last p observations
+            preds[t, :] = var_res.forecast(y=history.values[-p:], steps=1)[0]
+            # append actual to history (rolling 1-step scheme)
+            history = pd.concat([history, R_out.iloc[[t]]], axis=0)
+
+        pred_df = pd.DataFrame(preds, index=R_out.index, columns=R_out.columns)
+        mse_out = ((R_out - pred_df) ** 2).mean()
+        print("\nOut-of-sample 1-step MSE (no refit):")
+        for s in mse_out.index:
+            print(f"  {s}: {mse_out[s]:.4e}")
+    except Exception as e:
+        print("OOS forecast skipped due to:", e)
+
+
+print("\n=== VAR lag order check (AIC/BIC/HQIC + fast OOS) ===")
+p_grid = range(1, 11)
+sel_rows = []
+
+for p_try in p_grid:
+    try:
+        # Fit ONCE for this p
+        m = VAR(R_in).fit(maxlags=p_try, ic=None, trend='c')
+        aic, bic, hqic = m.aic, m.bic, m.hqic
+
+        # Fast 1-step rolling OOS with fixed params
+        if len(R_out) > 0:
+            hist_vals = R_in.values.copy()
+            oos_vals = R_out.values
+            preds = np.empty_like(oos_vals)
+
+            for t in range(len(oos_vals)):
+                preds[t, :] = m.forecast(y=hist_vals[-p_try:], steps=1)[0]
+                hist_vals = np.vstack([hist_vals, oos_vals[t]])
+
+            mse_oos = float(np.mean((oos_vals - preds) ** 2))
+        else:
+            mse_oos = np.nan
+
+        sel_rows.append({'p': p_try, 'AIC': aic, 'BIC': bic, 'HQIC': hqic, 'OOS_MSE': mse_oos})
+        print(f"  p={p_try:2d} | AIC={aic:.6f} BIC={bic:.6f} HQIC={hqic:.6f} OOS_MSE={mse_oos:.3e}")
+    except Exception as e:
+        sel_rows.append({'p': p_try, 'AIC': np.nan, 'BIC': np.nan, 'HQIC': np.nan, 'OOS_MSE': np.nan})
+        print(f"  p={p_try:2d} | ERROR: {e}")
+
+sel_df = pd.DataFrame(sel_rows).set_index('p').sort_index()
+print("\nSelection table:")
+print(sel_df.to_string(float_format=lambda x: f"{x:.6f}"))
+
+def argmin_or_none(s):
+    s = s.astype(float)
+    return s.index[np.nanargmin(s.values)] if np.isfinite(s.values).any() else None
+
+p_aic = argmin_or_none(sel_df['AIC'])
+p_bic = argmin_or_none(sel_df['BIC'])
+p_hq  = argmin_or_none(sel_df['HQIC'])
+p_oos = argmin_or_none(sel_df['OOS_MSE'])
+
+print("\nPreferred lag by criterion:")
+print(f"  AIC : p = {p_aic}")
+print(f"  BIC : p = {p_bic}")
+print(f"  HQIC: p = {p_hq}")
+print(f"  OOS : p = {p_oos}")
+
+
+
+
+
+
 
 ###########################################################
 
