@@ -63,7 +63,6 @@ if len(missing_periods) > 0:
 returns_spy5p = np.log(spy5p_series / spy5p_series.shift(1)).dropna()
 print(f"\nTrading hours coverage:")
 hourly_coverage = returns_spy5p.groupby(returns_spy5p.index.hour).size().sort_index()
-
 for hour, count in hourly_coverage.items():
     if hour == 17:
         # last bucket is only a half hour
@@ -71,7 +70,6 @@ for hour, count in hourly_coverage.items():
     else:
         end_hour = (hour + 1) % 24
         print(f"  {hour:02d}:00-{end_hour:02d}:00 - {count:,} observations")
-
 
 
 # ARMA Data Preparation
@@ -170,11 +168,7 @@ ax2.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.show()
 
-#Traditional ARMA ACF/PACF patterns:
-#- AR(p): ACF decays exponentially, PACF cuts off at lag p
-#- MA(q): ACF cuts off at lag q, PACF decays exponentially  
-#- ARMA(p,q): Both decay exponentially (smooth decline)
-
+# Report note: Traditional ARMA patterns show exponential decay, but data shows sporadic specific-lag patterns
 
 # Sample Split
 print("")
@@ -191,19 +185,20 @@ print("")
 print("ARMA Model Estimation")
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.stats.diagnostic import acorr_ljungbox
-import itertools #iterators for efficient looping
+import itertools
 
-# Suppress warnings for clean output
+# Suppress warnings
 from statsmodels.tools.sm_exceptions import ValueWarning, ConvergenceWarning
 warnings.filterwarnings('ignore', category=ValueWarning)
 warnings.filterwarnings('ignore', category=ConvergenceWarning)
 warnings.filterwarnings('ignore', message='No supported index is available')
 
 # Assignment models: p,q ∈ {0,1,2}
-assignment_combinations = list(itertools.product([0, 1, 2], [0, 1, 2])) # itertools.product creates all combinations: (0,0), (0,1), (0,2), (1,0), (1,1), (1,2), (2,0), (2,1), (2,2)
-assignment_combinations.remove((0, 0))
+# itertools.product creates all combinations: (0,0), (0,1), (0,2), (1,0), (1,1), (1,2), (2,0), (2,1), (2,2)
+assignment_combinations = list(itertools.product([0, 1, 2], [0, 1, 2]))
+assignment_combinations.remove((0, 0))  # Remove white noise
 
-# Selected higher-order models based on ACF/PACF analysis
+# Higher-order models based on ACF/PACF patterns (lags 4,5)
 # Report note: Only selected combinations estimated for computational efficiency
 higher_order_combinations = [(0, 5), (1, 5), (4, 4), (5, 5)]
 
@@ -211,8 +206,10 @@ all_combinations = assignment_combinations + higher_order_combinations
 results_dict = {}
 
 print(f"Estimating {len(all_combinations)} ARMA models on {len(in_sample):,} observations")
+print("Assignment models: p,q ∈ {0,1,2} + selected higher-order models")
 print("")
 
+# Estimate models
 for p, q in all_combinations:
     model_name = f"ARMA({p},{q})"
     
@@ -220,39 +217,52 @@ for p, q in all_combinations:
         model = ARIMA(in_sample, order=(p, 0, q))
         fitted_model = model.fit()
         
-        # Report note: HAC standard errors appropriate for high-frequency data
-        try:
-            robust_results = fitted_model.get_robustcov_results(cov_type='HAC', maxlags=5)
-            hac_std_errors = robust_results.bse
-        except:
-            hac_std_errors = fitted_model.bse
-        
         # Ljung-Box diagnostic test
         ljung_box = acorr_ljungbox(fitted_model.resid, lags=10, return_df=True)
         ljung_box_pvalue = ljung_box['lb_pvalue'].iloc[-1]
+        ljung_box_stat = ljung_box['lb_stat'].iloc[-1]
         
         # Out-of-sample evaluation
         if len(out_sample) > 0:
             try:
                 forecast = fitted_model.forecast(steps=len(out_sample))
-                out_sample_mse = np.mean((out_sample.values - forecast)**2)
+                out_sample_residuals = out_sample.values - forecast
+                out_sample_mse = np.mean(out_sample_residuals**2)
+                
+                # Out-of-sample Ljung-Box
+                if len(out_sample_residuals) > 10:
+                    ljung_box_out = acorr_ljungbox(out_sample_residuals, lags=10, return_df=True)
+                    ljung_box_out_pvalue = ljung_box_out['lb_pvalue'].iloc[-1]
+                    ljung_box_out_stat = ljung_box_out['lb_stat'].iloc[-1]
+                else:
+                    ljung_box_out_pvalue = np.nan
+                    ljung_box_out_stat = np.nan
             except:
-                out_sample_mse = None
+                out_sample_mse = np.nan
+                ljung_box_out_pvalue = np.nan
+                ljung_box_out_stat = np.nan
         else:
-            out_sample_mse = None
+            out_sample_mse = np.nan
+            ljung_box_out_pvalue = np.nan
+            ljung_box_out_stat = np.nan
         
         results_dict[model_name] = {
             'model': fitted_model,
+            'converged': fitted_model.mle_retvals['converged'],
+            # In-sample statistics
             'aic': fitted_model.aic,
             'bic': fitted_model.bic,
-            'loglik': fitted_model.llf,
+            'loglik_in': fitted_model.llf,
             'mse_in': fitted_model.mse,
+            'ljung_box_stat_in': ljung_box_stat,
+            'ljung_box_pvalue_in': ljung_box_pvalue,
+            # Out-of-sample statistics  
             'mse_out': out_sample_mse,
-            'ljung_box_pvalue': ljung_box_pvalue,
+            'ljung_box_stat_out': ljung_box_out_stat,
+            'ljung_box_pvalue_out': ljung_box_out_pvalue,
+            # Parameters
             'params': fitted_model.params,
             'std_errors': fitted_model.bse,
-            'hac_std_errors': hac_std_errors,
-            'converged': fitted_model.mle_retvals['converged']
         }
         
         conv_status = "Conv" if fitted_model.mle_retvals['converged'] else "Fail"
@@ -261,75 +271,144 @@ for p, q in all_combinations:
     except Exception:
         print(f"{model_name:12} | ERROR")
 
-# Model Comparison
+# Assignment Required Table Format
 print("")
-print("Model Comparison")
+print("=" * 80)
+print("ASSIGNMENT TABLE: Required Models (p,q ∈ {0,1,2})")
+print("=" * 80)
 
-converged_models = {k: v for k, v in results_dict.items() if v['converged']}
+# Assignment models only for main table
+assignment_models = ['ARMA(0,1)', 'ARMA(0,2)', 'ARMA(1,0)', 'ARMA(1,1)', 
+                    'ARMA(1,2)', 'ARMA(2,0)', 'ARMA(2,1)', 'ARMA(2,2)']
+assignment_converged = {k: v for k, v in results_dict.items() 
+                      if k in assignment_models and v.get('converged', False)}
 
-if converged_models:
-    aic_ranking = sorted(converged_models.items(), key=lambda x: x[1]['aic'])
+if assignment_converged:
+    model_names = sorted(assignment_converged.keys())
+    
+    # Parameter estimates section
+    print("\nPARAMETER ESTIMATES:")
+    print("Parameter    " + "".join([f"{name:>12}" for name in model_names]))
+    print("-" * (13 + 12 * len(model_names)))
+    
+    # Find all unique parameters
+    all_params = set()
+    for result in assignment_converged.values():
+        all_params.update(result['params'].index)
+    
+    # Sort parameters logically
+    param_order = ['const'] + [f'ar.L{i}' for i in range(1, 6)] + [f'ma.L{i}' for i in range(1, 6)]
+    ordered_params = [p for p in param_order if p in all_params]
+    
+    for param in ordered_params:
+        param_row = f"{param:<12}"
+        for model_name in model_names:
+            if param in assignment_converged[model_name]['params']:
+                est = assignment_converged[model_name]['params'][param]
+                param_row += f"{est:12.6f}"
+            else:
+                param_row += f"{'--':>12}"
+        print(param_row)
+    
+       # Standard errors section - FIXED INDENTATION
+    print(f"\nSTANDARD ERRORS:")
+    print("Parameter    " + "".join([f"{name:>12}" for name in model_names]))
+    print("-" * (13 + 12 * len(model_names)))
+    
+    for param in ordered_params:
+        param_row = f"{param}_SE"[:12]
+        param_row = f"{param_row:<12}"
+        for model_name in model_names:
+            if param in assignment_converged[model_name]['std_errors']:
+                se = assignment_converged[model_name]['std_errors'][param]
+                # Use scientific notation for tiny values
+                if abs(se) < 1e-5:
+                    param_row += f"{se:12.2e}"  # Scientific notation
+                else:
+                    param_row += f"{se:12.6f}"
+            else:
+                param_row += f"{'--':>12}"
+        print(param_row)
+
+    # Statistics section  
+    print("")
+    print("=" * 80)
+    print("MODEL STATISTICS")
+    print("=" * 80)
+
+    print(f"\nIN-SAMPLE STATISTICS (n = {len(in_sample):,}):")
+    print("Statistic    " + "".join([f"{name:>12}" for name in model_names]))
+    print("-" * (13 + 12 * len(model_names)))
+
+    stats_in = ['aic', 'bic', 'loglik_in', 'mse_in', 'ljung_box_stat_in', 'ljung_box_pvalue_in']
+    stat_labels = ['AIC', 'BIC', 'Log-Lik', 'MSE', 'LB-Stat', 'LB-pval']
+
+    for stat, label in zip(stats_in, stat_labels):
+        stat_row = f"{label:<12}"
+        for model_name in model_names:
+            value = assignment_converged[model_name][stat]
+            if stat in ['aic', 'bic', 'loglik_in']:
+                stat_row += f"{value:12.2f}"
+            elif stat in ['mse_in']:  # Special handling for MSE
+                stat_row += f"{value:12.2e}"  # Scientific notation
+            else:
+                stat_row += f"{value:12.6f}"
+        print(stat_row)
+
+    print(f"\nOUT-OF-SAMPLE STATISTICS (n = {len(out_sample):,}):")
+    print("Statistic    " + "".join([f"{name:>12}" for name in model_names]))
+    print("-" * (13 + 12 * len(model_names)))
+
+    stats_out = ['mse_out', 'ljung_box_stat_out', 'ljung_box_pvalue_out']
+    stat_labels_out = ['MSE', 'LB-Stat', 'LB-pval']
+
+    for stat, label in zip(stats_out, stat_labels_out):
+        stat_row = f"{label:<12}"
+        for model_name in model_names:
+            value = assignment_converged[model_name][stat]
+            if np.isnan(value):
+                stat_row += f"{'N/A':>12}"
+            elif stat in ['mse_out']:  # Special handling for MSE  
+                stat_row += f"{value:12.2e}"  # Scientific notation
+            else:
+                stat_row += f"{value:12.6f}"
+        print(stat_row)
+
+
+
+# Extended Analysis: All Models Comparison
+print("")
+print("=" * 80)
+print("EXTENDED ANALYSIS: All Models Including Higher-Order")
+print("=" * 80)
+
+all_converged = {k: v for k, v in results_dict.items() if v.get('converged', False)}
+
+if all_converged:
+    # Top models by AIC
+    aic_ranking = sorted(all_converged.items(), key=lambda x: x[1]['aic'])
     print("Top 5 models by AIC:")
     for i, (model_name, results) in enumerate(aic_ranking[:5]):
-        print(f"  {i+1}. {model_name:12} AIC: {results['aic']:8.2f} | LB: {results['ljung_box_pvalue']:.3f}")
-
-# Assignment Required Models
-print("")
-print("Assignment Required Models (p,q ∈ {0,1,2})")
-assignment_models = ['ARMA(0,1)', 'ARMA(0,2)', 'ARMA(1,0)', 'ARMA(1,1)', 'ARMA(1,2)', 
-                    'ARMA(2,0)', 'ARMA(2,1)', 'ARMA(2,2)']
-
-print("Model        | AIC       | BIC       | LB p-val | MSE(in)   | MSE(out)  | Conv")
-print("-" * 75)
-for model_name in assignment_models:
-    if model_name in results_dict:
-        r = results_dict[model_name]
-        conv_status = "Y" if r['converged'] else "N"
-        mse_out_str = f"{r['mse_out']:.2e}" if r['mse_out'] is not None else "N/A"
-        print(f"{model_name:12} | {r['aic']:9.2f} | {r['bic']:9.2f} | {r['ljung_box_pvalue']:8.3f} | {r['mse_in']:.2e} | {mse_out_str:9} | {conv_status}")
-
-# Standard Errors Analysis
-print("")
-print("Standard Errors Analysis")
-if converged_models:
-    best_model_name = min(converged_models.items(), key=lambda x: x[1]['aic'])[0]
-    best_results = results_dict[best_model_name]
-    
-    print(f"Best model: {best_model_name}")
-    print("Parameter    | Estimate  | Std SE    | HAC SE    | t(Std) | t(HAC)")
-    print("-" * 65)
-    
-    for param_name in best_results['params'].index:
-        if param_name != 'sigma2':
-            estimate = best_results['params'][param_name]
-            std_se = best_results['std_errors'][param_name]
-            hac_se = best_results['hac_std_errors'][param_name]
-            t_stat_std = estimate / std_se if std_se != 0 else np.nan
-            t_stat_hac = estimate / hac_se if hac_se != 0 else np.nan
-            
-            print(f"{param_name:12} | {estimate:9.6f} | {std_se:9.6f} | {hac_se:9.6f} | {t_stat_std:6.1f} | {t_stat_hac:6.1f}")
+        print(f"  {i+1}. {model_name:12} AIC: {results['aic']:8.2f} | LB: {results['ljung_box_pvalue_in']:.3f}")
 
 # Model Selection Summary
 print("")
 print("Model Selection Summary")
-if converged_models:
-    assignment_converged = {k: v for k, v in converged_models.items() if k in assignment_models}
-    if assignment_converged:
-        best_assignment = min(assignment_converged.items(), key=lambda x: x[1]['aic'])
-        best_overall = min(converged_models.items(), key=lambda x: x[1]['aic'])
-        
-        aic_improvement = best_assignment[1]['aic'] - best_overall[1]['aic']
-        
-        print(f"Best assignment model: {best_assignment[0]} (AIC: {best_assignment[1]['aic']:.2f})")
-        print(f"Best overall model: {best_overall[0]} (AIC: {best_overall[1]['aic']:.2f})")
-        print(f"AIC improvement: {aic_improvement:.0f} points")
-        
-### Super Optional!!!!!
-# Test sparse microstructure model
-print("\n=== MICROSTRUCTURE MODEL EXPLORATION ===")
+if assignment_converged and all_converged:
+    best_assignment = min(assignment_converged.items(), key=lambda x: x[1]['aic'])
+    best_overall = min(all_converged.items(), key=lambda x: x[1]['aic'])
+    
+    aic_improvement = best_assignment[1]['aic'] - best_overall[1]['aic']
+    
+    print(f"Best assignment model: {best_assignment[0]} (AIC: {best_assignment[1]['aic']:.2f})")
+    print(f"Best overall model: {best_overall[0]} (AIC: {best_overall[1]['aic']:.2f})")
+    print(f"AIC improvement: {aic_improvement:.0f} points")
 
-# Direct lag regression (no MA terms)
-from statsmodels.tsa.api import VAR
+# Microstructure Model Exploration
+print("")
+print("Microstructure Model Exploration")
+
+# Direct lag regression
 from sklearn.linear_model import LinearRegression
 
 # Create lagged variables
@@ -354,7 +433,7 @@ y_test = test['return']
 # Simple OLS regression
 reg = LinearRegression().fit(X_train, y_train)
 
-# Compare with ARMA(5,5)
+# Compare with best ARMA
 pred_sparse = reg.predict(X_test)
 mse_sparse = np.mean((y_test - pred_sparse)**2)
 
@@ -363,7 +442,20 @@ print(f"  Coefficients: {reg.coef_}")
 print(f"  Out-sample MSE: {mse_sparse:.2e}")
 print(f"  R-squared: {reg.score(X_test, y_test):.6f}")
 
-print(f"\nARMA(5,5) out-sample MSE: {results_dict['ARMA(5,5)']['mse_out']:.2e}")
-print(f"MSE ratio (sparse/ARMA): {mse_sparse / results_dict['ARMA(5,5)']['mse_out']:.3f}")
+if all_converged:
+    best_arma_mse = min([v['mse_out'] for v in all_converged.values() if not np.isnan(v['mse_out'])])
+    print(f"\nBest ARMA out-sample MSE: {best_arma_mse:.2e}")
+    print(f"MSE ratio (sparse/best ARMA): {mse_sparse / best_arma_mse:.3f}")
 
+
+###########################################################
+### 3.4
 print(" === Question 3.3 ===")
+
+###########################################################
+
+### 3.4
+print(" === Question 3.4 ===")
+
+
+# GARCH Model Estimation
