@@ -22,6 +22,12 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import warnings
+from statsmodels.tsa.stattools import adfuller
+from statsmodels.tsa.stattools import acf, pacf
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.stats.diagnostic import acorr_ljungbox
+import itertools
 warnings.filterwarnings('ignore')
 
 ###########################################################
@@ -71,10 +77,33 @@ for hour, count in hourly_coverage.items():
         end_hour = (hour + 1) % 24
         print(f"  {hour:02d}:00-{end_hour:02d}:00 - {count:,} observations")
 
+# Missing Data Handling for ARMA (Assignment Option 4)
+# Option 4: Drop r=max(p,q) periods after each missing observation
+# This maintains regular time intervals required for ARMA likelihood calculation
 
-# ARMA Data Preparation
-arma_data = returns_spy5p.dropna()
-print(f"\nARMA input data: {len(arma_data):,} observations")
+max_lag = 2  # For assignment models p,q ∈ {0,1,2}, max(p,q) = 2
+
+# Find missing data positions
+missing_mask = spy5p_series.isnull()
+missing_positions = missing_mask[missing_mask].index
+
+# Create exclusion mask: drop max_lag periods after each missing observation
+exclude_mask = missing_mask.copy()
+for missing_time in missing_positions:
+    for i in range(1, max_lag + 1):
+        next_time = missing_time + pd.Timedelta(minutes=i)
+        if next_time in spy5p_series.index:
+            exclude_mask[next_time] = True
+
+# Apply exclusion and compute returns
+spy5p_clean = spy5p_series[~exclude_mask]
+returns_clean = np.log(spy5p_clean / spy5p_clean.shift(1)).dropna()
+
+# ARMA Data Preparation  
+arma_data = returns_clean
+
+print(f"Missing data treatment: Option 4 (drop max(p,q) periods after missing)")
+print(f"ARMA input data: {len(arma_data):,} observations")
 
 # Time gap validation
 time_gaps = arma_data.index.to_series().diff()[1:]
@@ -118,7 +147,6 @@ print(f"Returns range: {arma_data.min():.6f} to {arma_data.max():.6f}")
 print(f"Returns mean: {arma_data.mean():.2e}")
 
 # Stationarity Test
-from statsmodels.tsa.stattools import adfuller
 adf_result = adfuller(arma_data, autolag='AIC')
 print(f"\nADF Test Statistic: {adf_result[0]:.6f}")
 print(f"p-value: {adf_result[1]:.6f}")
@@ -130,7 +158,6 @@ print(f"Skewness: {arma_data.skew():.4f}")
 print(f"Kurtosis: {arma_data.kurtosis():.4f}")
 
 # ACF/PACF Analysis
-from statsmodels.tsa.stattools import acf, pacf
 
 lags = 10  
 acf_values = acf(arma_data, nlags=lags, fft=True)
@@ -149,7 +176,7 @@ bound = 1.96 / np.sqrt(n)
 print(f"\n95% significance bound: ±{bound:.6f}")
 
 # Visual ACF/PACF Analysis
-from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+
 
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
 
@@ -183,9 +210,7 @@ print(f"Out-sample: {len(out_sample):,} obs ({out_sample.index[0]} to {out_sampl
 # ARMA Model Estimation
 print("")
 print("ARMA Model Estimation")
-from statsmodels.tsa.arima.model import ARIMA
-from statsmodels.stats.diagnostic import acorr_ljungbox
-import itertools
+
 
 # Suppress warnings
 from statsmodels.tools.sm_exceptions import ValueWarning, ConvergenceWarning
@@ -578,6 +603,10 @@ print(f"  OOS : p = {p_oos}")
 
 
 
+"""
+###########################################################
+### 3.3
+print(" === Question 3.3 ===")
 
 ###########################################################
 
@@ -585,4 +614,52 @@ print(f"  OOS : p = {p_oos}")
 print(" === Question 3.4 ===")
 
 
-# GARCH Model Estimation
+# Extract SPY5.P series (already defined but ensure it's clean)
+spy5p_series = df['SPY5.P'].dropna()
+
+# Daily Data Extraction for GARCH Analysis
+daily_prices = spy5p_series.groupby(spy5p_series.index.date).last()
+daily_prices.index = pd.to_datetime(daily_prices.index)
+
+# Daily percentage log returns
+daily_returns = np.log(daily_prices / daily_prices.shift(1)).dropna() * 100
+print(f"Original minute observations: {len(spy5p_series):,}")
+print(f"Daily closing prices: {len(daily_prices):,}")
+print(f"Daily returns: {len(daily_returns):,}")
+print(f"Date range: {daily_returns.index[0].date()} to {daily_returns.index[-1].date()}")
+print("")
+
+# Basic Daily Return Characteristics
+print("Daily Return Characteristics (Percentage Points)")
+print(f"Mean: {daily_returns.mean():.4f}%")
+print(f"Std Dev: {daily_returns.std():.4f}%")
+print(f"Min: {daily_returns.min():.4f}% (worst daily loss)")  
+print(f"Max: {daily_returns.max():.4f}% (best daily gain)")
+print(f"Skewness: {daily_returns.skew():.4f}")
+print(f"Excess Kurtosis: {daily_returns.kurtosis():.4f}")
+print("")
+
+# Simple volatility bands plot
+plt.figure(figsize=(12, 6))
+
+# Plot returns
+plt.plot(daily_returns.index, daily_returns.values, linewidth=0.8, color='blue', alpha=0.7)
+
+# Add ±2σ bands
+std_dev = daily_returns.std()
+plt.axhline(y=2*std_dev, color='red', linestyle='--', alpha=0.7, label='+2σ')
+plt.axhline(y=-2*std_dev, color='red', linestyle='--', alpha=0.7, label='-2σ')
+plt.axhline(y=0, color='black', linestyle='-', alpha=0.5)
+
+plt.title('Daily Percentage Log Returns with ±2σ Bands')
+plt.xlabel('Date')
+plt.ylabel('Returns (%)')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.show()
+
+# GARCH imports
+from scipy import stats
+from statsmodels.stats.diagnostic import het_arch
+
+"""
