@@ -598,7 +598,246 @@ print(f"  BIC : p = {p_bic}")
 print(f"  HQIC: p = {p_hq}")
 print(f"  OOS : p = {p_oos}")
 
+print("\n=== QUESTION 3.3b — Significance & Cross-effects ===")
 
+# --- Collect coefficients, SEs, t, p for a tidy table
+params = var_res.params.copy()        # DataFrame: rows = equations, cols = coeffs (const, L1.x, ... or x.L1)
+bse    = var_res.stderr.copy()
+tvals  = var_res.tvalues.copy()
+pvals  = var_res.pvalues.copy()
+
+# Build long-format table with nice labels and significance stars
+def stars(p):
+    return '***' if p < 0.01 else '**' if p < 0.05 else '*' if p < 0.10 else ''
+
+# --- Robust coefficient label parser (supports both label styles)
+import re
+def parse_coef_label(coef: str, eq_name: str):
+    """
+    Returns (lag:int, src:str, kind:str) for a VAR coefficient label.
+    Supports both 'Lk.SYMBOL' and 'SYMBOL.Lk' styles. 'const' -> (0, '-', 'intercept')
+    """
+    if coef == 'const':
+        return 0, '-', 'intercept'
+
+    # Style A: 'L3.SPY5.P'
+    m = re.match(r'^L(\d+)\.(.+)$', coef)
+    if m:
+        lag = int(m.group(1))
+        src = m.group(2)
+        kind = 'own-lag' if src == eq_name else 'cross-lag'
+        return lag, src, kind
+
+    # Style B: 'SPY5.P.L3'
+    m = re.match(r'^(.+)\.L(\d+)$', coef)
+    if m:
+        src = m.group(1)
+        lag = int(m.group(2))
+        kind = 'own-lag' if src == eq_name else 'cross-lag'
+        return lag, src, kind
+
+    # Fallback: unknown formatting
+    return np.nan, coef, 'other'
+
+long_rows = []
+for eq in params.index:                 # equation/dependent variable names
+    for coef in params.columns:         # 'const', 'L1.SPY5.P' OR 'SPY5.P.L1', etc.
+        b = params.loc[eq, coef]
+        se = bse.loc[eq, coef]
+        t = tvals.loc[eq, coef]
+        p = pvals.loc[eq, coef]
+        lag, src, kind = parse_coef_label(coef, eq)
+        long_rows.append({
+            'equation': eq,
+            'term': coef,
+            'source_var': src,
+            'lag': lag,
+            'type': kind,
+            'beta': b,
+            'stderr': se,
+            't': t,
+            'p': p,
+            'sig': stars(p)
+        })
+
+coef_df = (pd.DataFrame(long_rows)
+           .sort_values(['equation','type','lag','source_var'], na_position='last'))
+
+# Pretty print per equation
+for dep in coef_df['equation'].unique():
+    sub = coef_df[coef_df['equation']==dep].copy()
+    print(f"\n--- Coefficient table for equation: {dep} ---")
+    # columns to show
+    show = sub[['term','type','source_var','lag','beta','stderr','t','p','sig']].copy()
+    # nice rounding
+    show['beta']   = show['beta'].map(lambda x: f"{x: .6f}")
+    show['stderr'] = show['stderr'].map(lambda x: f"{x: .6f}")
+    show['t']      = show['t'].map(lambda x: f"{x: .2f}")
+    show['p']      = show['p'].map(lambda x: f"{x: .3g}")
+    # add significance stars right next to beta
+    show['beta±']  = show['beta'] + show['sig']
+    show = show.drop(columns=['beta','sig'])
+    show = show.rename(columns={'term':'parameter','source_var':'from','lag':'L'})
+    # order and print
+    show = show[['parameter','type','from','L','beta±','stderr','t','p']]
+    print(show.to_string(index=False))
+
+# --- Summarise cross-effects: how many and which lags are significant?
+alpha = 0.05
+cross_sig = coef_df[(coef_df['type']=='cross-lag') & (coef_df['p']<alpha)].copy()
+if cross_sig.empty:
+    print("\nCross-effects: None significant at 5% level.")
+else:
+    print("\nCross-effects (p<0.05):")
+    # aggregate by direction
+    summary = (cross_sig
+               .assign(direction = cross_sig['source_var'] + " → " + cross_sig['equation'])
+               .groupby(['direction','lag'])
+               .apply(lambda g: f"β≈{g['beta'].mean():.4g} (avg)")
+               .reset_index(name='coef_info'))
+    for direction in summary['direction'].unique():
+        chunk = summary[summary['direction']==direction]
+        # guard against any NaN lags
+        lags  = ", ".join([f"L{int(L)} {info}" for L, info in zip(chunk['lag'], chunk['coef_info']) if pd.notnull(L)])
+        print(f"  {direction}: {lags}")
+
+# --- Who drives whom? Granger causality tests (per slides)
+#     H0: past of X does NOT help predict Y (reject => X Granger-causes Y)
+#     Use same lag length p as in the fitted VAR
+p_gr = var_res.k_ar
+series = list(R_in.columns)
+
+def granger(direction_y, direction_x):
+    # Does X -> Y ?
+    res = var_res.test_causality(caused=direction_y, causing=[direction_x], kind='f')
+    return {'caused': direction_y, 'causing': direction_x,
+            'stat': float(res.statistic), 'pval': float(res.pvalue), 'df': tuple(res.df)}
+
+print("\nGranger causality (F-tests, lag length = %d):" % p_gr)
+gc_rows = []
+for y in series:
+    for x in series:
+        if x == y: 
+            continue
+        try:
+            gc_rows.append(granger(y, x))
+        except Exception:
+            gc_rows.append({'caused': y, 'causing': x, 'stat': np.nan, 'pval': np.nan, 'df': None})
+
+gc_df = pd.DataFrame(gc_rows)
+for _, r in gc_df.iterrows():
+    verdict = "YES (reject H0)" if (r['pval'] < 0.05) else "no"
+    print(f"  {r['causing']} ⇒ {r['caused']}: F={r['stat']:.2f}, p={r['pval']:.3g}  → Granger-cause: {verdict}")
+
+# Quick directional summary
+drivers = (gc_df
+           .assign(drives=lambda d: np.where(d['pval']<0.05, 1, 0))
+           .groupby('causing')['drives'].sum())
+if len(drivers)>0:
+    top_driver = drivers.sort_values(ascending=False).index[0]
+    print(f"\nDirectionality summary: strongest Granger ‘driver’ (count of significant targets) → {top_driver}")
+
+
+print("\n=== QUESTION 3.3c — Residual diagnostics & zero-correlation check ===")
+
+# Grab residuals from your fitted VAR (already computed above as `resid`)
+resid = var_res.resid.copy()
+eq_names = list(resid.columns)
+nT = len(resid)
+
+# ---------- 1) Normality-ish visuals (hist + QQ) ----------
+import scipy.stats as st
+
+fig, axes = plt.subplots(2, 2, figsize=(12, 9))
+for j, s in enumerate(eq_names):
+    axh = axes[j, 0]
+    axq = axes[j, 1]
+    rj = resid[s].values
+
+    # histogram + normal fit line
+    axh.hist(rj, bins=60, density=True, alpha=0.6)
+    mu, sd = np.mean(rj), np.std(rj)
+    xs = np.linspace(mu-4*sd, mu+4*sd, 201)
+    axh.plot(xs, st.norm.pdf(xs, mu, sd), lw=1.2)
+    axh.set_title(f"{s} residuals: hist + N({mu:.2e},{sd:.2e})")
+    axh.grid(True, alpha=0.3)
+
+    # QQ-plot vs normal
+    osm, osr = st.probplot(rj, dist="norm")[:2]  # returns (theoretical, ordered), (slope, intercept, r)
+    st.probplot(rj, dist="norm", plot=axq)
+    axq.set_title(f"{s} residuals: QQ-normal")
+    axq.grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+
+# ---------- 2) Per-equation whiteness already checked via Ljung–Box above ----------
+# (kept for context in the report)
+
+# ---------- 3) Contemporaneous correlation: test ρ=0 ----------
+r = float(resid.corr().iloc[0,1])
+t_stat = r * np.sqrt((nT - 2) / (1 - r**2))
+p_val = 2 * (1 - st.t.cdf(abs(t_stat), df=nT-2))
+
+# 95% CI using Fisher z-transform
+z = np.arctanh(np.clip(r, -0.999999, 0.999999))
+se_z = 1 / np.sqrt(nT - 3)
+z_lo, z_hi = z - 1.96*se_z, z + 1.96*se_z
+ci_lo, ci_hi = np.tanh([z_lo, z_hi])
+
+print("\nZero-correlation (lag 0) test for residuals:")
+print(f"  Corr({eq_names[0]}, {eq_names[1]}) = {r:.6f}")
+print(f"  t = {t_stat:.2f},  p = {p_val:.3g}  (H0: rho=0)")
+print(f"  95% CI for rho: [{ci_lo:.6f}, {ci_hi:.6f}]")
+
+# ---------- 4) Scatter of residuals (visual quick check on Σ_u off-diagonal) ----------
+plt.figure(figsize=(6,5))
+plt.scatter(resid[eq_names[0]], resid[eq_names[1]], s=3, alpha=0.2)
+m, b = np.polyfit(resid[eq_names[0]], resid[eq_names[1]], 1)
+xs = np.linspace(resid[eq_names[0]].min(), resid[eq_names[0]].max(), 100)
+plt.plot(xs, m*xs + b, lw=1)
+plt.title(f"Residual scatter: {eq_names[0]} vs {eq_names[1]} (r={r:.3f})")
+plt.xlabel(eq_names[0]); plt.ylabel(eq_names[1])
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+# ---------- 5) Cross-correlation function (CCF) with 95% bands ----------
+max_lag = 10
+x = resid[eq_names[0]].values
+y = resid[eq_names[1]].values
+
+def ccf(x, y, L):
+    x = x - x.mean(); y = y - y.mean()
+    denom = np.sqrt(np.sum(x**2) * np.sum(y**2))
+    out = []
+    for k in range(-L, L+1):
+        if k >= 0:
+            num = np.sum(x[k:] * y[:len(y)-k])
+        else:
+            num = np.sum(x[:len(x)+k] * y[-k:])
+        out.append(num / denom)
+    return np.array(out)
+
+cc = ccf(x, y, max_lag)
+lags = np.arange(-max_lag, max_lag+1)
+# Approximate 95% band for zero CCF under independence: ±1.96/sqrt(T)
+band = 1.96 / np.sqrt(nT)
+
+plt.figure(figsize=(10,4))
+plt.stem(lags, cc, use_line_collection=True)
+plt.axhline(band, ls='--', lw=1); plt.axhline(-band, ls='--', lw=1)
+plt.axhline(0, color='k', lw=0.8)
+plt.title(f"Residual cross-correlation (±95% ~ {band:.3f})")
+plt.xlabel("Lag (y leads >0)"); plt.ylabel("CCF")
+plt.tight_layout()
+plt.show()
+
+# ---------- 6) Quick multivariate summary for report ----------
+print("\nResiduals summary for report:")
+print(f"  • Per-equation Ljung–Box(10): already above (whiteness).")
+print(f"  • Corr matrix off-diagonal: {r:.3f} (p={p_val:.3g}); 95% CI [{ci_lo:.3f}, {ci_hi:.3f}].")
+print(f"  • CCF lags within ±{band:.3f}? Inspect the stem plot; spikes outside the band indicate remaining cross-dependence.")
 
 
 
