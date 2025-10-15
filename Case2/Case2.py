@@ -16,461 +16,148 @@ Date:
 Author:
     Group 9
 """
+
 ###########################################################
 ### Imports
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import warnings
-from statsmodels.tsa.stattools import adfuller
-from statsmodels.tsa.stattools import acf, pacf
+from statsmodels.tsa.stattools import adfuller, acf, pacf
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.stats.diagnostic import acorr_ljungbox
 import itertools
+
 warnings.filterwarnings('ignore')
 
-###########################################################
-
-### Load Data
+# Load data
 github_url = "https://raw.githubusercontent.com/avandersluys/EconometricsForQuantitativeFinance/7f88e429a23a03593352b07a64f9d882017f5246/Case2/sp_9.csv.gz"
 df = pd.read_csv(github_url, index_col=0, parse_dates=True)
 
-# Exploratory Data Analysis
-print("Exploratory Data Analysis")
-print("")
-print(f"Shape: {df.shape[0]:,} observations × {df.shape[1]} symbols")
-print(f"Symbols: {list(df.columns)}")
+# Basic info
+print("Basic Data Info:")
+print(f"Shape: {df.shape}")
+print(f"Columns: {list(df.columns)}")
 print(f"Date range: {df.index.min()} to {df.index.max()}")
-print(f"Time span: {(df.index.max() - df.index.min()).days} days")
-print("")
 
-# Missing Values Analysis  
-print("Missing values:")
-for col in df.columns:
-    missing = df[col].isnull().sum()
-    pct = (missing/len(df))*100
-    print(f"  {col}: {missing:,} ({pct:.1f}%)")
+# Extract and clean SPY5.P
+spy5p_series = df['SPY5.P'].dropna()
+returns = np.log(spy5p_series / spy5p_series.shift(1))*100
+returns_clean = returns.copy()
 
-# Missing data patterns for SPY5.P
-spy5p_series = df['SPY5.P'].copy()
-missing_mask = spy5p_series.isnull()
-missing_periods = df.index[missing_mask]
+# Remove first 3 observations of each trading day 
+daily_groups = returns_clean.groupby(returns_clean.index.date)
+returns_cleaned = pd.concat([group.iloc[3:] for date, group in daily_groups if len(group) > 3])
 
-if len(missing_periods) > 0:
-    print(f"\nMissing data periods:")
-    missing_df = pd.DataFrame({'datetime': missing_periods})
-    missing_df['date'] = missing_df['datetime'].dt.date
-    missing_by_date = missing_df.groupby('date').size()
-    for date, count in missing_by_date.items():
-        print(f"  {date}: {count} missing observations")
+print(f"Original returns: {len(returns)} observations")
+print(f"After cleaning: {len(returns_cleaned)} observations")
+print(f"Range: {returns_cleaned.min():.4f}% to {returns_cleaned.max():.4f}%")
 
-# Market structure validation
-returns_spy5p = np.log(spy5p_series / spy5p_series.shift(1)).dropna()
-print(f"\nTrading hours coverage:")
-hourly_coverage = returns_spy5p.groupby(returns_spy5p.index.hour).size().sort_index()
-for hour, count in hourly_coverage.items():
-    if hour == 17:
-        # last bucket is only a half hour
-        print(f"  17:00-17:30 - {count:,} observations")
-    else:
-        end_hour = (hour + 1) % 24
-        print(f"  {hour:02d}:00-{end_hour:02d}:00 - {count:,} observations")
+# Split data
+returns_2024 = returns_cleaned[returns_cleaned.index < '2025-01-01']
+returns_2025 = returns_cleaned[returns_cleaned.index >= '2025-01-01']
+print(f"In-sample (2024): {len(returns_2024)} obs")
+print(f"Out-sample (2025): {len(returns_2025)} obs")
 
-# Missing Data Handling for ARMA (Assignment Option 4)
-# Option 4: Drop r=max(p,q) periods after each missing observation
-# This maintains regular time intervals required for ARMA likelihood calculation
 
-max_lag = 2  # For assignment models p,q ∈ {0,1,2}, max(p,q) = 2
-
-# Find missing data positions
-missing_mask = spy5p_series.isnull()
-missing_positions = missing_mask[missing_mask].index
-
-# Create exclusion mask: drop max_lag periods after each missing observation
-exclude_mask = missing_mask.copy()
-for missing_time in missing_positions:
-    for i in range(1, max_lag + 1):
-        next_time = missing_time + pd.Timedelta(minutes=i)
-        if next_time in spy5p_series.index:
-            exclude_mask[next_time] = True
-
-# Apply exclusion and compute returns
-spy5p_clean = spy5p_series[~exclude_mask]
-returns_clean = np.log(spy5p_clean / spy5p_clean.shift(1)).dropna()
-
-# ARMA Data Preparation  
-arma_data = returns_clean
-
-print(f"Missing data treatment: Option 4 (drop max(p,q) periods after missing)")
-print(f"ARMA input data: {len(arma_data):,} observations")
-
-# Time gap validation
-time_gaps = arma_data.index.to_series().diff()[1:]
-normal_gap = pd.Timedelta(minutes=1)
-large_gaps = time_gaps[time_gaps > normal_gap * 10]
-
-print(f"Normal 1-minute intervals: {(time_gaps == normal_gap).sum():,}")
-print(f"Large gaps (>10min): {len(large_gaps)}")
-if len(large_gaps) > 0:
-    print("Large gaps occur on:")
-    for gap_time in large_gaps.index[:5]:
-        print(f"  {gap_time.date()}")
-
-# Price and Returns Visualization
-print("")
-print("Price and Returns Visualization")
-
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 10))
-
-spy5p_prices = df['SPY5.P'].dropna()
-ax1.plot(spy5p_prices.index, spy5p_prices.values, linewidth=0.8, color='blue', alpha=0.8)
-ax1.set_title('SPY5.P Price Levels', fontsize=12)
-ax1.set_ylabel('Price (EUR)')
-ax1.grid(True, alpha=0.3)
-
-ax2.plot(arma_data.index, arma_data.values, linewidth=0.5, color='red', alpha=0.7)
-ax2.set_title('SPY5.P Log Returns', fontsize=12)
-ax2.set_ylabel('Log Returns')
-ax2.set_xlabel('Date')
-ax2.grid(True, alpha=0.3)
-ax2.axhline(y=0, color='black', linestyle='--', alpha=0.5)
-ax2.axhline(y=arma_data.mean(), color='green', linestyle='--', alpha=0.7, 
-           label=f'Mean = {arma_data.mean():.2e}')
-ax2.legend()
-
-plt.tight_layout()
-plt.show()
-
-print(f"Price range: {spy5p_prices.min():.2f} to {spy5p_prices.max():.2f} EUR")
-print(f"Returns range: {arma_data.min():.6f} to {arma_data.max():.6f}")
-print(f"Returns mean: {arma_data.mean():.2e}")
-
-# Stationarity Test
-adf_result = adfuller(arma_data, autolag='AIC')
-print(f"\nADF Test Statistic: {adf_result[0]:.6f}")
-print(f"p-value: {adf_result[1]:.6f}")
-
-# Basic Return Properties
-print(f"\nMean return: {arma_data.mean():.8f}")
-print(f"Std deviation: {arma_data.std():.6f}")
-print(f"Skewness: {arma_data.skew():.4f}")
-print(f"Kurtosis: {arma_data.kurtosis():.4f}")
+# ADF Test
+adf_result = adfuller(returns_2024.dropna(), autolag='AIC')
+print(f"\\nADF Test Statistic: {adf_result[0]:.6f}")
+print(f"p-value: {adf_result[1]:.2e}")
 
 # ACF/PACF Analysis
+clean_returns = returns_2024.dropna()
+lags = 60
+acf_values = acf(clean_returns, nlags=lags, fft=True)
+pacf_values = pacf(clean_returns, nlags=lags, method='ols')
 
-lags = 10  
-acf_values = acf(arma_data, nlags=lags, fft=True)
-pacf_values = pacf(arma_data, nlags=lags, method='ols')
-
-print("\nFirst 10 ACF values:")
-for i in range(11):
-    print(f"  Lag {i}: {acf_values[i]:.6f}")
-
-print("\nFirst 10 PACF values:")  
-for i in range(11):
-    print(f"  Lag {i}: {pacf_values[i]:.6f}")
-
-n = len(arma_data)
+# Significance bounds
+n = len(clean_returns)
 bound = 1.96 / np.sqrt(n)
-print(f"\n95% significance bound: ±{bound:.6f}")
+print(f"\\n95% confidence bounds: ±{bound:.6f}")
 
-# Visual ACF/PACF Analysis
+print("\\nFirst 10 ACF values:")
+for i in range(11):
+    sig = "***" if abs(acf_values[i]) > bound else ""
+    print(f"  Lag {i:2d}: {acf_values[i]:8.6f} {sig}")
 
+print("\\nFirst 10 PACF values:")  
+for i in range(11):
+    sig = "***" if abs(pacf_values[i]) > bound else ""
+    print(f"  Lag {i:2d}: {pacf_values[i]:8.6f} {sig}")
 
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+# Create plots
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
 
-plot_acf(arma_data, lags=10, ax=ax1, alpha=0.05, 
-         title='SPY5.P Returns - ACF (Lags 1-10)')
-ax1.set_xlim(1, 10)
-ax1.set_ylim(-0.15, 0.15)
+plot_acf(clean_returns, lags=20, ax=ax1, alpha=0.05, title='SPY5.P Returns - ACF')
 ax1.grid(True, alpha=0.3)
 
-plot_pacf(arma_data, lags=10, ax=ax2, alpha=0.05,
-          title='SPY5.P Returns - PACF (Lags 1-10)')
-ax2.set_xlim(1, 10)
-ax2.set_ylim(-0.15, 0.15)
+plot_pacf(clean_returns, lags=20, ax=ax2, alpha=0.05, title='SPY5.P Returns - PACF')
 ax2.grid(True, alpha=0.3)
 
 plt.tight_layout()
 plt.show()
 
-# Report note: Traditional ARMA patterns show exponential decay, but data shows sporadic specific-lag patterns
-
-# Sample Split
-print("")
-print("Sample Split")
-split_date = '2025-01-02'
-in_sample = arma_data[arma_data.index < split_date]
-out_sample = arma_data[arma_data.index >= split_date]
-
-print(f"In-sample: {len(in_sample):,} obs ({in_sample.index[0]} to {in_sample.index[-1]})")
-print(f"Out-sample: {len(out_sample):,} obs ({out_sample.index[0]} to {out_sample.index[-1]})")
-
 # ARMA Model Estimation
-print("")
-print("ARMA Model Estimation")
+print(f"\\n=== ARMA MODEL ESTIMATION ===")
 
+# All combinations p,q ∈ {0,1,2}
+models_to_estimate = [(p,q) for p in range(3) for q in range(3)]
+results = {}
 
-# Suppress warnings
-from statsmodels.tools.sm_exceptions import ValueWarning, ConvergenceWarning
-warnings.filterwarnings('ignore', category=ValueWarning)
-warnings.filterwarnings('ignore', category=ConvergenceWarning)
-warnings.filterwarnings('ignore', message='No supported index is available')
+print(f"\\n{'Model':<10} | {'Converged':<10} | {'AIC':<10} | {'BIC':<10} | {'LogLik':<10} | {'LB_stat':<10} | {'LB_pval':<10}")
+print("-" * 80)
 
-# Assignment models: p,q ∈ {0,1,2}
-# itertools.product creates all combinations: (0,0), (0,1), (0,2), (1,0), (1,1), (1,2), (2,0), (2,1), (2,2)
-assignment_combinations = list(itertools.product([0, 1, 2], [0, 1, 2]))
-assignment_combinations.remove((0, 0))  # Remove white noise
-
-# Higher-order models based on ACF/PACF patterns (lags 4,5)
-# Report note: Only selected combinations estimated for computational efficiency
-higher_order_combinations = [(0, 5), (1, 5), (4, 4), (5, 5)]
-
-all_combinations = assignment_combinations + higher_order_combinations
-results_dict = {}
-
-print(f"Estimating {len(all_combinations)} ARMA models on {len(in_sample):,} observations")
-print("Assignment models: p,q ∈ {0,1,2} + selected higher-order models")
-print("")
-
-# Estimate models
-for p, q in all_combinations:
+for p, q in models_to_estimate:
     model_name = f"ARMA({p},{q})"
+    model = ARIMA(clean_returns, order=(p, 0, q))
+    fitted = model.fit()
     
-    try:
-        model = ARIMA(in_sample, order=(p, 0, q))
-        fitted_model = model.fit()
-        
-        # Ljung-Box diagnostic test
-        ljung_box = acorr_ljungbox(fitted_model.resid, lags=10, return_df=True)
-        ljung_box_pvalue = ljung_box['lb_pvalue'].iloc[-1]
-        ljung_box_stat = ljung_box['lb_stat'].iloc[-1]
-        
-        # Out-of-sample evaluation
-        if len(out_sample) > 0:
-            try:
-                forecast = fitted_model.forecast(steps=len(out_sample))
-                out_sample_residuals = out_sample.values - forecast
-                out_sample_mse = np.mean(out_sample_residuals**2)
-                
-                # Out-of-sample Ljung-Box
-                if len(out_sample_residuals) > 10:
-                    ljung_box_out = acorr_ljungbox(out_sample_residuals, lags=10, return_df=True)
-                    ljung_box_out_pvalue = ljung_box_out['lb_pvalue'].iloc[-1]
-                    ljung_box_out_stat = ljung_box_out['lb_stat'].iloc[-1]
-                else:
-                    ljung_box_out_pvalue = np.nan
-                    ljung_box_out_stat = np.nan
-            except:
-                out_sample_mse = np.nan
-                ljung_box_out_pvalue = np.nan
-                ljung_box_out_stat = np.nan
-        else:
-            out_sample_mse = np.nan
-            ljung_box_out_pvalue = np.nan
-            ljung_box_out_stat = np.nan
-        
-        results_dict[model_name] = {
-            'model': fitted_model,
-            'converged': fitted_model.mle_retvals['converged'],
-            # In-sample statistics
-            'aic': fitted_model.aic,
-            'bic': fitted_model.bic,
-            'loglik_in': fitted_model.llf,
-            'mse_in': fitted_model.mse,
-            'ljung_box_stat_in': ljung_box_stat,
-            'ljung_box_pvalue_in': ljung_box_pvalue,
-            # Out-of-sample statistics  
-            'mse_out': out_sample_mse,
-            'ljung_box_stat_out': ljung_box_out_stat,
-            'ljung_box_pvalue_out': ljung_box_out_pvalue,
-            # Parameters
-            'params': fitted_model.params,
-            'std_errors': fitted_model.bse,
-        }
-        
-        conv_status = "Conv" if fitted_model.mle_retvals['converged'] else "Fail"
-        print(f"{model_name:12} | AIC: {fitted_model.aic:8.2f} | BIC: {fitted_model.bic:8.2f} | LB: {ljung_box_pvalue:.3f} | {conv_status}")
-        
-    except Exception:
-        print(f"{model_name:12} | ERROR")
+    params = fitted.params.to_dict()
+    std_errors = fitted.bse.to_dict()
+    residuals = fitted.resid
+    aic = fitted.aic
+    bic = fitted.bic
+    loglik = fitted.llf
+    converged = fitted.mle_retvals['converged'] if fitted.mle_retvals else False
 
-# Assignment Required Table Format
-print("")
-print("=" * 80)
-print("ASSIGNMENT TABLE: Required Models (p,q ∈ {0,1,2})")
-print("=" * 80)
-
-# Assignment models only for main table
-assignment_models = ['ARMA(0,1)', 'ARMA(0,2)', 'ARMA(1,0)', 'ARMA(1,1)', 
-                    'ARMA(1,2)', 'ARMA(2,0)', 'ARMA(2,1)', 'ARMA(2,2)']
-assignment_converged = {k: v for k, v in results_dict.items() 
-                      if k in assignment_models and v.get('converged', False)}
-
-if assignment_converged:
-    model_names = sorted(assignment_converged.keys())
+    # Ljung-Box test
+    lb_test = acorr_ljungbox(residuals.dropna(), lags=10, return_df=True)
+    lb_stat = lb_test['lb_stat'].iloc[-1]
+    lb_pval = lb_test['lb_pvalue'].iloc[-1]
     
-    # Parameter estimates section
-    print("\nPARAMETER ESTIMATES:")
-    print("Parameter    " + "".join([f"{name:>12}" for name in model_names]))
-    print("-" * (13 + 12 * len(model_names)))
+    # Out-of-sample MSE
+    if len(returns_2025) > 0 and fitted is not None:
+        forecast = fitted.forecast(steps=len(returns_2025))
+        mse_out = np.mean((returns_2025.dropna().values - forecast.values[:len(returns_2025.dropna())])**2)
+    else:
+        mse_out = np.nan
     
-    # Find all unique parameters
-    all_params = set()
-    for result in assignment_converged.values():
-        all_params.update(result['params'].index)
+    # Store results
+    results[model_name] = {
+        'params': params,
+        'std_errors': std_errors,
+        'converged': converged,
+        'aic': aic,
+        'bic': bic,
+        'loglik': loglik,
+        'mse_in': np.mean(residuals**2),
+        'mse_out': mse_out,
+        'lb_stat': lb_stat,
+        'lb_pval': lb_pval
+    }
     
-    # Sort parameters logically
-    param_order = ['const'] + [f'ar.L{i}' for i in range(1, 6)] + [f'ma.L{i}' for i in range(1, 6)]
-    ordered_params = [p for p in param_order if p in all_params]
-    
-    for param in ordered_params:
-        param_row = f"{param:<12}"
-        for model_name in model_names:
-            if param in assignment_converged[model_name]['params']:
-                est = assignment_converged[model_name]['params'][param]
-                param_row += f"{est:12.6f}"
-            else:
-                param_row += f"{'--':>12}"
-        print(param_row)
-    
-       # Standard errors section - FIXED INDENTATION
-    print(f"\nSTANDARD ERRORS:")
-    print("Parameter    " + "".join([f"{name:>12}" for name in model_names]))
-    print("-" * (13 + 12 * len(model_names)))
-    
-    for param in ordered_params:
-        param_row = f"{param}_SE"[:12]
-        param_row = f"{param_row:<12}"
-        for model_name in model_names:
-            if param in assignment_converged[model_name]['std_errors']:
-                se = assignment_converged[model_name]['std_errors'][param]
-                # Use scientific notation for tiny values
-                if abs(se) < 1e-5:
-                    param_row += f"{se:12.2e}"  # Scientific notation
-                else:
-                    param_row += f"{se:12.6f}"
-            else:
-                param_row += f"{'--':>12}"
-        print(param_row)
-
-    # Statistics section  
-    print("")
-    print("=" * 80)
-    print("MODEL STATISTICS")
-    print("=" * 80)
-
-    print(f"\nIN-SAMPLE STATISTICS (n = {len(in_sample):,}):")
-    print("Statistic    " + "".join([f"{name:>12}" for name in model_names]))
-    print("-" * (13 + 12 * len(model_names)))
-
-    stats_in = ['aic', 'bic', 'loglik_in', 'mse_in', 'ljung_box_stat_in', 'ljung_box_pvalue_in']
-    stat_labels = ['AIC', 'BIC', 'Log-Lik', 'MSE', 'LB-Stat', 'LB-pval']
-
-    for stat, label in zip(stats_in, stat_labels):
-        stat_row = f"{label:<12}"
-        for model_name in model_names:
-            value = assignment_converged[model_name][stat]
-            if stat in ['aic', 'bic', 'loglik_in']:
-                stat_row += f"{value:12.2f}"
-            elif stat in ['mse_in']:  # Special handling for MSE
-                stat_row += f"{value:12.2e}"  # Scientific notation
-            else:
-                stat_row += f"{value:12.6f}"
-        print(stat_row)
-
-    print(f"\nOUT-OF-SAMPLE STATISTICS (n = {len(out_sample):,}):")
-    print("Statistic    " + "".join([f"{name:>12}" for name in model_names]))
-    print("-" * (13 + 12 * len(model_names)))
-
-    stats_out = ['mse_out', 'ljung_box_stat_out', 'ljung_box_pvalue_out']
-    stat_labels_out = ['MSE', 'LB-Stat', 'LB-pval']
-
-    for stat, label in zip(stats_out, stat_labels_out):
-        stat_row = f"{label:<12}"
-        for model_name in model_names:
-            value = assignment_converged[model_name][stat]
-            if np.isnan(value):
-                stat_row += f"{'N/A':>12}"
-            elif stat in ['mse_out']:  # Special handling for MSE  
-                stat_row += f"{value:12.2e}"  # Scientific notation
-            else:
-                stat_row += f"{value:12.6f}"
-        print(stat_row)
+    conv_status = "YES" if converged else "NO"
+    print(f"{model_name:<10} | {conv_status:<10} | {aic:<10.2f} | {bic:<10.2f} | {loglik:<10.2f} | {lb_stat:<10.2f} | {lb_pval:<10.3f}")
 
 
+# Best models
+aic_best = min(results.keys(), key=lambda k: results[k]['aic'])
+bic_best = min(results.keys(), key=lambda k: results[k]['bic'])
 
-# Extended Analysis: All Models Comparison
-print("")
-print("=" * 80)
-print("EXTENDED ANALYSIS: All Models Including Higher-Order")
-print("=" * 80)
-
-all_converged = {k: v for k, v in results_dict.items() if v.get('converged', False)}
-
-if all_converged:
-    # Top models by AIC
-    aic_ranking = sorted(all_converged.items(), key=lambda x: x[1]['aic'])
-    print("Top 5 models by AIC:")
-    for i, (model_name, results) in enumerate(aic_ranking[:5]):
-        print(f"  {i+1}. {model_name:12} AIC: {results['aic']:8.2f} | LB: {results['ljung_box_pvalue_in']:.3f}")
-
-# Model Selection Summary
-print("")
-print("Model Selection Summary")
-if assignment_converged and all_converged:
-    best_assignment = min(assignment_converged.items(), key=lambda x: x[1]['aic'])
-    best_overall = min(all_converged.items(), key=lambda x: x[1]['aic'])
-    
-    aic_improvement = best_assignment[1]['aic'] - best_overall[1]['aic']
-    
-    print(f"Best assignment model: {best_assignment[0]} (AIC: {best_assignment[1]['aic']:.2f})")
-    print(f"Best overall model: {best_overall[0]} (AIC: {best_overall[1]['aic']:.2f})")
-    print(f"AIC improvement: {aic_improvement:.0f} points")
-
-# Microstructure Model Exploration
-print("")
-print("Microstructure Model Exploration")
-
-# Direct lag regression
-from sklearn.linear_model import LinearRegression
-
-# Create lagged variables
-lag_data = pd.DataFrame({
-    'return': arma_data,
-    'lag1': arma_data.shift(1),
-    'lag4': arma_data.shift(4), 
-    'lag5': arma_data.shift(5)
-}).dropna()
-
-# Split sample
-split_idx = int(0.8 * len(lag_data))
-train = lag_data[:split_idx]
-test = lag_data[split_idx:]
-
-# Fit sparse model
-X_train = train[['lag1', 'lag4', 'lag5']]
-y_train = train['return']
-X_test = test[['lag1', 'lag4', 'lag5']]
-y_test = test['return']
-
-# Simple OLS regression
-reg = LinearRegression().fit(X_train, y_train)
-
-# Compare with best ARMA
-pred_sparse = reg.predict(X_test)
-mse_sparse = np.mean((y_test - pred_sparse)**2)
-
-print(f"Sparse model (lags 1,4,5):")
-print(f"  Coefficients: {reg.coef_}")
-print(f"  Out-sample MSE: {mse_sparse:.2e}")
-print(f"  R-squared: {reg.score(X_test, y_test):.6f}")
-
-if all_converged:
-    best_arma_mse = min([v['mse_out'] for v in all_converged.values() if not np.isnan(v['mse_out'])])
-    print(f"\nBest ARMA out-sample MSE: {best_arma_mse:.2e}")
-    print(f"MSE ratio (sparse/best ARMA): {mse_sparse / best_arma_mse:.3f}")
+print(f"\\nBest by AIC: {aic_best}")
+print(f"Best by BIC: {bic_best}")
 
 
 ############################################################## 3.3
@@ -613,10 +300,10 @@ def stars(p):
 # --- Robust coefficient label parser (supports both label styles)
 import re
 def parse_coef_label(coef: str, eq_name: str):
-    """
-    Returns (lag:int, src:str, kind:str) for a VAR coefficient label.
-    Supports both 'Lk.SYMBOL' and 'SYMBOL.Lk' styles. 'const' -> (0, '-', 'intercept')
-    """
+    
+    #Returns (lag:int, src:str, kind:str) for a VAR coefficient label.
+    #Supports both 'Lk.SYMBOL' and 'SYMBOL.Lk' styles. 'const' -> (0, '-', 'intercept')
+    
     if coef == 'const':
         return 0, '-', 'intercept'
 
@@ -842,7 +529,7 @@ print(f"  • CCF lags within ±{band:.3f}? Inspect the stem plot; spikes outsid
 
 
 
-"""
+
 ###########################################################
 ### 3.3
 print(" === Question 3.3 ===")
@@ -897,8 +584,284 @@ plt.legend()
 plt.grid(True, alpha=0.3)
 plt.show()
 
+
 # GARCH imports
 from scipy import stats
 from statsmodels.stats.diagnostic import het_arch
+from arch import arch_model  
 
-"""
+print(f"\n" + "="*60)
+print("SECTION 3.4: GARCH MODELING")
+print("="*60)
+
+# Convert minute returns to daily returns
+print("\n=== DAILY RETURN CONVERSION ===")
+
+# Get daily closing prices (last price each day)
+daily_prices = spy5p_series.groupby(spy5p_series.index.date).last()
+daily_prices.index = pd.to_datetime(daily_prices.index)
+
+# Calculate daily percentage log returns
+daily_returns = np.log(daily_prices / daily_prices.shift(1)) * 100
+daily_returns = daily_returns.dropna()
+
+print(f"Daily prices: {len(daily_prices)} observations")
+print(f"Daily returns: {len(daily_returns)} observations")
+print(f"Date range: {daily_returns.index.min().date()} to {daily_returns.index.max().date()}")
+print(f"Daily return range: {daily_returns.min():.4f}% to {daily_returns.max():.4f}%")
+print(f"Daily return std: {daily_returns.std():.4f}%")
+
+# Basic daily return statistics
+print("\nDaily Return Statistics:")
+print(daily_returns.describe())
+
+# Test for ARCH effects
+print(f"\n=== ARCH EFFECTS TEST ===")
+arch_test = het_arch(daily_returns.dropna(), maxlag=5)
+print(f"ARCH Test (5 lags):")
+print(f"  LM Statistic: {arch_test[0]:.6f}")
+print(f"  p-value: {arch_test[1]:.6f}")
+print(f"  F-Statistic: {arch_test[2]:.6f}")
+print(f"  F p-value: {arch_test[3]:.6f}")
+
+# GARCH Model Estimation
+print(f"\n=== GARCH MODEL ESTIMATION ===")
+
+# Model combinations: p,q ∈ {1,2} for GARCH and EGARCH (8 models total)
+garch_models = []
+for p in [1, 2]:
+    for q in [1, 2]:
+        garch_models.append(('GARCH', p, q))
+        garch_models.append(('EGARCH', p, q))
+
+garch_results = {}
+
+print(f"\n{'Model':<12} | {'Converged':<10} | {'AIC':<10} | {'BIC':<10} | {'LogLik':<10}")
+print("-" * 65)
+
+for model_type, p, q in garch_models:
+    model_name = f"{model_type}({p},{q})"
+    
+    try:
+        if model_type == 'GARCH':
+            # Standard GARCH model
+            model = arch_model(daily_returns.dropna(), vol='Garch', p=p, q=q, 
+                             mean='Constant', dist='normal', rescale=False)
+        else:  # EGARCH
+            # EGARCH model  
+            model = arch_model(daily_returns.dropna(), vol='EGARCH', p=p, q=q,
+                             mean='Constant', dist='normal', rescale=False)
+        
+        # Fit model
+        fitted = model.fit(disp='off', show_warning=False)
+        
+        # Extract results
+        converged = fitted.convergence_flag == 0
+        aic = fitted.aic
+        bic = fitted.bic
+        loglik = fitted.loglikelihood
+        
+        # Store results
+        garch_results[model_name] = {
+            'fitted_model': fitted,
+            'converged': converged,
+            'aic': aic,
+            'bic': bic,
+            'loglik': loglik,
+            'params': fitted.params,
+            'std_errors': fitted.std_err,
+            'conditional_volatility': fitted.conditional_volatility
+        }
+        
+        conv_status = "YES" if converged else "NO"
+        print(f"{model_name:<12} | {conv_status:<10} | {aic:<10.2f} | {bic:<10.2f} | {loglik:<10.2f}")
+        
+    except Exception as e:
+        print(f"{model_name:<12} | ERROR: {str(e)[:40]}")
+        garch_results[model_name] = {'error': str(e)}
+
+# Find best models
+successful_garch = {k: v for k, v in garch_results.items() if 'error' not in v}
+
+if successful_garch:
+    aic_best_garch = min(successful_garch.keys(), key=lambda k: successful_garch[k]['aic'])
+    bic_best_garch = min(successful_garch.keys(), key=lambda k: successful_garch[k]['bic'])
+    
+    print(f"\nBest GARCH by AIC: {aic_best_garch}")
+    print(f"Best GARCH by BIC: {bic_best_garch}")
+
+# GARCH Results Table
+print(f"\n=== GARCH PARAMETER ESTIMATES ===")
+
+if successful_garch:
+    models = list(successful_garch.keys())
+    
+    # Get all parameter names
+    all_params = set()
+    for res in successful_garch.values():
+        all_params.update(res['params'].index)
+    
+    print(f"\n{'Parameter':<15}", end="")
+    for model in models:
+        print(f" | {model:<12}", end="")
+    print()
+    print("-" * (15 + 15 * len(models)))
+    
+    # Parameter estimates
+    for param in sorted(all_params):
+        # Parameter values
+        row = f"{param:<15}"
+        for model in models:
+            if param in successful_garch[model]['params']:
+                val = successful_garch[model]['params'][param]
+                row += f" | {val:>10.6f}  "
+            else:
+                row += f" | {'--':>10}    "
+        print(row)
+        
+        # Standard errors  
+        row = f"{'(SE)':<15}"
+        for model in models:
+            if param in successful_garch[model]['std_errors']:
+                se = successful_garch[model]['std_errors'][param]
+                row += f" | ({se:>8.6f}) "
+            else:
+                row += f" | {'--':>10}    "
+        print(row)
+
+# Model diagnostics
+print(f"\n=== GARCH MODEL DIAGNOSTICS ===")
+
+if successful_garch:
+    print(f"\n{'Diagnostic':<15}", end="")
+    for model in models:
+        print(f" | {model:<12}", end="")
+    print()
+    print("-" * (15 + 15 * len(models)))
+    
+    diagnostics = [
+        ('Converged', 'converged', 's'),
+        ('AIC', 'aic', '.2f'),
+        ('BIC', 'bic', '.2f'),
+        ('Log-Likelihood', 'loglik', '.2f')
+    ]
+    
+    for diag_name, key, fmt in diagnostics:
+        row = f"{diag_name:<15}"
+        for model in models:
+            val = successful_garch[model][key]
+            if fmt == 's':
+                status = "YES" if val else "NO" 
+                row += f" | {status:>10}    "
+            else:
+                row += f" | {val:>10{fmt}}  "
+        print(row)
+
+# Calculate Realized Volatility from intraday returns
+print(f"\n=== REALIZED VOLATILITY CALCULATION ===")
+
+# Use cleaned minute returns for RV calculation
+intraday_returns = returns_cleaned.copy()
+
+# Calculate daily realized volatility (sum of squared intraday returns)
+daily_rv = intraday_returns.groupby(intraday_returns.index.date).apply(lambda x: (x**2).sum())
+daily_rv.index = pd.to_datetime(daily_rv.index)
+daily_rv = daily_rv.dropna()
+
+print(f"Realized Volatility series: {len(daily_rv)} observations")
+print(f"RV range: {daily_rv.min():.6f} to {daily_rv.max():.6f}")
+print(f"RV mean: {daily_rv.mean():.6f}")
+
+# Align dates for comparison (common dates only)
+if successful_garch:
+    # Get best GARCH and EGARCH models
+    best_garch_name = aic_best_garch
+    best_egarch_name = None
+    
+    # Find best EGARCH
+    egarch_models = {k: v for k, v in successful_garch.items() if k.startswith('EGARCH')}
+    if egarch_models:
+        best_egarch_name = min(egarch_models.keys(), key=lambda k: egarch_models[k]['aic'])
+    
+    print(f"\nBest GARCH model: {best_garch_name}")
+    if best_egarch_name:
+        print(f"Best EGARCH model: {best_egarch_name}")
+    
+    # Extract conditional volatilities (convert to variance by squaring)
+    garch_vol = successful_garch[best_garch_name]['conditional_volatility']
+    garch_var = garch_vol ** 2
+    
+    if best_egarch_name:
+        egarch_vol = successful_garch[best_egarch_name]['conditional_volatility'] 
+        egarch_var = egarch_vol ** 2
+    
+    # Align all series to common dates
+    common_dates = daily_rv.index.intersection(garch_var.index)
+    
+    if len(common_dates) > 0:
+        rv_aligned = daily_rv.loc[common_dates]
+        garch_aligned = garch_var.loc[common_dates] 
+        
+        print(f"\nCommon observations for comparison: {len(common_dates)}")
+        print(f"Date range: {common_dates.min().date()} to {common_dates.max().date()}")
+        
+        # Summary statistics comparison
+        print(f"\nVariance Comparison:")
+        print(f"  Realized Variance:  Mean={rv_aligned.mean():.6f}, Std={rv_aligned.std():.6f}")
+        print(f"  GARCH Variance:     Mean={garch_aligned.mean():.6f}, Std={garch_aligned.std():.6f}")
+        
+        if best_egarch_name:
+            egarch_aligned = egarch_var.loc[common_dates]
+            print(f"  EGARCH Variance:    Mean={egarch_aligned.mean():.6f}, Std={egarch_aligned.std():.6f}")
+
+print(f"\n" + "="*60)
+print("GARCH ANALYSIS COMPLETE")
+print("="*60)
+
+# 1. PLOT GARCH vs EGARCH vs RV
+print(f"\n=== VOLATILITY COMPARISON PLOTS ===")
+
+if successful_garch and len(common_dates) > 0:
+    # Get data for plotting
+    rv_plot = daily_rv.loc[common_dates]
+    garch_plot = successful_garch[best_garch_name]['conditional_volatility'].loc[common_dates] ** 2
+    egarch_plot = successful_garch[best_egarch_name]['conditional_volatility'].loc[common_dates] ** 2
+    
+    # Create comparison plot
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10))
+    
+    # Top panel: Time series
+    ax1.plot(common_dates, rv_plot.values, label='Realized Variance', alpha=0.7, linewidth=1)
+    ax1.plot(common_dates, garch_plot.values, label=f'{best_garch_name} Variance', alpha=0.8, linewidth=1.2)
+    ax1.plot(common_dates, egarch_plot.values, label=f'{best_egarch_name} Variance', alpha=0.8, linewidth=1.2)
+    ax1.set_title('Variance Comparison: GARCH vs EGARCH vs Realized Variance')
+    ax1.set_ylabel('Variance')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # Bottom panel: Scatter plot RV vs GARCH
+    ax2.scatter(rv_plot.values, garch_plot.values, alpha=0.6, s=20, label=f'{best_garch_name}', color='red')
+    ax2.scatter(rv_plot.values, egarch_plot.values, alpha=0.6, s=20, label=f'{best_egarch_name}', color='blue')
+    
+    # 45-degree line (perfect fit)
+    min_val = min(rv_plot.min(), garch_plot.min(), egarch_plot.min())
+    max_val = max(rv_plot.max(), garch_plot.max(), egarch_plot.max())
+    ax2.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, label='Perfect Fit')
+    
+    ax2.set_xlabel('Realized Variance')
+    ax2.set_ylabel('Model Variance')
+    ax2.set_title('Model vs Realized Variance Scatter')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Calculate correlations
+    corr_garch_rv = rv_plot.corr(garch_plot)
+    corr_egarch_rv = rv_plot.corr(egarch_plot)
+    
+    print(f"Correlations with Realized Variance:")
+    print(f"  {best_garch_name}: {corr_garch_rv:.4f}")
+    print(f"  {best_egarch_name}: {corr_egarch_rv:.4f}")
+
