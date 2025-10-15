@@ -161,10 +161,10 @@ print(f"Best by BIC: {bic_best}")
 
 
 ############################################################## 3.3a (simplified)
+split_date = pd.Timestamp('2025-01-01')
 print("\n=== QUESTION 3.3a — VAR(5) on returns (simplified) ===")
 
 from statsmodels.tsa.api import VAR
-from statsmodels.stats.diagnostic import acorr_ljungbox
 
 # 1) Two parallel listings of the same ETF
 symbols_var = ['SPY5.P', 'SPY5z.CHIX']
@@ -263,10 +263,10 @@ except Exception:
 print("\n=== QUESTION 3.3b — Significance & Cross-effects ===")
 
 # --- Collect coefficients, SEs, t, p for a tidy table
-params = var_res.params.copy()        # DataFrame: rows = equations, cols = coeffs (const, L1.x, ... or x.L1)
-bse    = var_res.stderr.copy()
-tvals  = var_res.tvalues.copy()
-pvals  = var_res.pvalues.copy()
+params = res.params.copy()        # DataFrame: rows = equations, cols = coeffs (const, L1.x, ... or x.L1)
+bse    = res.stderr.copy()
+tvals  = res.tvalues.copy()
+pvals  = res.pvalues.copy()
 
 # Build long-format table with nice labels and significance stars
 def stars(p):
@@ -366,12 +366,12 @@ else:
 # --- Who drives whom? Granger causality tests (per slides)
 #     H0: past of X does NOT help predict Y (reject => X Granger-causes Y)
 #     Use same lag length p as in the fitted VAR
-p_gr = var_res.k_ar
+p_gr = res.k_ar
 series = list(R_in.columns)
 
 def granger(direction_y, direction_x):
     # Does X -> Y ?
-    res = var_res.test_causality(caused=direction_y, causing=[direction_x], kind='f')
+    res = res.test_causality(caused=direction_y, causing=[direction_x], kind='f')
     return {'caused': direction_y, 'causing': direction_x,
             'stat': float(res.statistic), 'pval': float(res.pvalue), 'df': tuple(res.df)}
 
@@ -403,7 +403,7 @@ if len(drivers)>0:
 print("\n=== QUESTION 3.3c — Residual diagnostics & zero-correlation check ===")
 
 # Grab residuals from your fitted VAR (already computed above as `resid`)
-resid = var_res.resid.copy()
+resid = res.resid.copy()
 eq_names = list(resid.columns)
 nT = len(resid)
 
@@ -487,7 +487,7 @@ lags = np.arange(-max_lag, max_lag+1)
 band = 1.96 / np.sqrt(nT)
 
 plt.figure(figsize=(10,4))
-plt.stem(lags, cc, use_line_collection=True)
+plt.stem(lags, cc)
 plt.axhline(band, ls='--', lw=1); plt.axhline(-band, ls='--', lw=1)
 plt.axhline(0, color='k', lw=0.8)
 plt.title(f"Residual cross-correlation (±95% ~ {band:.3f})")
@@ -819,8 +819,8 @@ if successful_garch and len(common_dates) > 0:
     ax2.scatter(rv_plot.values, egarch_plot.values, alpha=0.6, s=20, label=f'{best_egarch_name}', color='blue')
     
     # 45-degree line (perfect fit)
-    min_val = min(rv_plot.min(), garch_plot.min(), egarch_plot.min())
-    max_val = max(rv_plot.max(), garch_plot.max(), egarch_plot.max())
+    min_val = 0
+    max_val = 15
     ax2.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, label='Perfect Fit')
     
     ax2.set_xlabel('Realized Variance')
