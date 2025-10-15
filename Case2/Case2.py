@@ -41,10 +41,42 @@ print(f"Shape: {df.shape}")
 print(f"Columns: {list(df.columns)}")
 print(f"Date range: {df.index.min()} to {df.index.max()}")
 
+# Calculate and print percentage of non-missing data for each series
+for col in df.columns:
+    pct_complete = 100 * df[col].notna().mean()
+    print(f"{col}: {pct_complete:.2f}% complete")
+
+# Check missing data pattern before dropna()
+print(f"Missing data check:")
+print(f"Total missing: {df['SPY5.P'].isna().sum()}")
+if df['SPY5.P'].isna().sum() > 0:
+    missing_hours = df[df['SPY5.P'].isna()].index.hour.value_counts().sort_index()
+    print(f"Missing by hour: {dict(missing_hours)}")
+    
+    # Show first few missing timestamps
+    missing_times = df[df['SPY5.P'].isna()].index[:10]
+    print(f"First missing times: {list(missing_times)}")
+
+# Check if missing days are holidays
+missing_dates = df[df['SPY5.P'].isna()].index.date
+unique_missing_dates = sorted(set(missing_dates))
+print(f"Missing dates: {unique_missing_dates[:5]}...")  # Show first few
+
+
 # Extract and clean SPY5.P
 spy5p_series = df['SPY5.P'].dropna()
 returns = np.log(spy5p_series / spy5p_series.shift(1))*100
+print(f"Shape: {returns.shape}")
 returns_clean = returns.copy()
+
+
+#Look at outliers
+max_return = returns_clean.max()
+min_return = returns_clean.min()
+max_date = returns_clean.idxmax()
+min_date = returns_clean.idxmin()
+print(f"Maximum: {max_return:.4f}% at {max_date}")
+print(f"Minimum: {min_return:.4f}% at {min_date}")
 
 # Remove first 3 observations of each trading day 
 daily_groups = returns_clean.groupby(returns_clean.index.date)
@@ -54,111 +86,291 @@ print(f"Original returns: {len(returns)} observations")
 print(f"After cleaning: {len(returns_cleaned)} observations")
 print(f"Range: {returns_cleaned.min():.4f}% to {returns_cleaned.max():.4f}%")
 
-# Split data
-returns_2024 = returns_cleaned[returns_cleaned.index < '2025-01-01']
-returns_2025 = returns_cleaned[returns_cleaned.index >= '2025-01-01']
-print(f"In-sample (2024): {len(returns_2024)} obs")
-print(f"Out-sample (2025): {len(returns_2025)} obs")
+#Look at outliers for this cleaned data 
+max_return = returns_cleaned.max()
+min_return = returns_cleaned.min()
+max_date = returns_cleaned.idxmax()
+min_date = returns_cleaned.idxmin()
+print(f"Maximum: {max_return:.4f}% at {max_date}")
+print(f"Minimum: {min_return:.4f}% at {min_date}")
+
+# Simple look around extreme values
+print(f"\nAround max return:")
+print(returns_cleaned.loc[max_date - pd.Timedelta(minutes=5):max_date + pd.Timedelta(minutes=5)])
+
+print(f"\nAround min return:")
+print(returns_cleaned.loc[min_date - pd.Timedelta(minutes=5):min_date + pd.Timedelta(minutes=5)])
 
 
 # ADF Test
-adf_result = adfuller(returns_2024.dropna(), autolag='AIC')
+adf_result = adfuller(returns_cleaned, autolag='AIC')
 print(f"\\nADF Test Statistic: {adf_result[0]:.6f}")
 print(f"p-value: {adf_result[1]:.2e}")
 
-# ACF/PACF Analysis
-clean_returns = returns_2024.dropna()
-lags = 60
+# ACF/PACF Analysis 
+clean_returns = returns_cleaned
+lags = 120  # 2 hours of minute data
 acf_values = acf(clean_returns, nlags=lags, fft=True)
 pacf_values = pacf(clean_returns, nlags=lags, method='ols')
 
 # Significance bounds
 n = len(clean_returns)
 bound = 1.96 / np.sqrt(n)
-print(f"\\n95% confidence bounds: ±{bound:.6f}")
+print(f"\n95% confidence bounds: ±{bound:.6f}")
 
-print("\\nFirst 10 ACF values:")
-for i in range(11):
-    sig = "***" if abs(acf_values[i]) > bound else ""
-    print(f"  Lag {i:2d}: {acf_values[i]:8.6f} {sig}")
+# Find all significant lags
+sig_acf = [(i, acf_values[i]) for i in range(1, lags+1) if abs(acf_values[i]) > bound]
+sig_pacf = [(i, pacf_values[i]) for i in range(1, lags+1) if abs(pacf_values[i]) > bound]
 
-print("\\nFirst 10 PACF values:")  
-for i in range(11):
-    sig = "***" if abs(pacf_values[i]) > bound else ""
-    print(f"  Lag {i:2d}: {pacf_values[i]:8.6f} {sig}")
+print(f"\nSignificant ACF lags (first 20): {[lag for lag, val in sig_acf[:20]]}")
+print(f"Significant PACF lags (first 20): {[lag for lag, val in sig_pacf[:20]]}")
+print(f"Total significant - ACF: {len(sig_acf)}, PACF: {len(sig_pacf)}")
 
-# Create plots
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+# Show pattern 
+if len(sig_acf) > 0:
+    max_sig_acf = max([lag for lag, val in sig_acf])
+    max_sig_pacf = max([lag for lag, val in sig_pacf]) if len(sig_pacf) > 0 else 0
+    print(f"Last significant lag - ACF: {max_sig_acf}, PACF: {max_sig_pacf}")
 
-plot_acf(clean_returns, lags=20, ax=ax1, alpha=0.05, title='SPY5.P Returns - ACF')
+# Create plots showing more detail
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8))
+
+# ACF plot - show first 30 lags 
+plot_acf(clean_returns, lags=30, ax=ax1, alpha=0.05, title='ACF - SPY5.P Returns (30-minute window)')
 ax1.grid(True, alpha=0.3)
+ax1.set_ylim(-0.05, 0.25)  
+ax1.set_xlabel('Lag (minutes)')
 
-plot_pacf(clean_returns, lags=20, ax=ax2, alpha=0.05, title='SPY5.P Returns - PACF')
+# PACF plot - show first 30 lags  
+plot_pacf(clean_returns, lags=30, ax=ax2, alpha=0.05, title='PACF - SPY5.P Returns (30-minute window)')
 ax2.grid(True, alpha=0.3)
+ax2.set_ylim(-0.05, 0.25)
+ax2.set_xlabel('Lag (minutes)')
 
 plt.tight_layout()
 plt.show()
 
-# ARMA Model Estimation
-print(f"\\n=== ARMA MODEL ESTIMATION ===")
+# Also create a zoomed version for first 10 lags
+fig2, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
 
-# All combinations p,q ∈ {0,1,2}
+plot_acf(clean_returns, lags=10, ax=ax1, alpha=0.05, title='ACF - SPY5.P Returns (Detailed View)')
+ax1.grid(True, alpha=0.3)
+ax1.set_ylim(-0.02, 0.25)  
+
+plot_pacf(clean_returns, lags=10, ax=ax2, alpha=0.05, title='PACF - SPY5.P Returns (Detailed View)')  
+ax2.grid(True, alpha=0.3)
+ax2.set_ylim(-0.06, 0.25)
+
+plt.tight_layout()
+plt.show()
+
+
+# Split data 
+returns_2024 = returns_cleaned[returns_cleaned.index < '2025-01-01']
+returns_2025 = returns_cleaned[returns_cleaned.index >= '2025-01-01']
+print(f"In-sample (2024): {len(returns_2024)} obs")
+print(f"Out-sample (2025): {len(returns_2025)} obs")
+
+# ARMA Model Estimation
+print(f"\n=== ARMA MODEL ESTIMATION ===")
+
 models_to_estimate = [(p,q) for p in range(3) for q in range(3)]
 results = {}
 
-print(f"\\n{'Model':<10} | {'Converged':<10} | {'AIC':<10} | {'BIC':<10} | {'LogLik':<10} | {'LB_stat':<10} | {'LB_pval':<10}")
-print("-" * 80)
+print(f"\n{'Model':<10} | {'Conv':<5} | {'AIC_In':<10} | {'AIC_Out':<10} | {'MSE_In':<10} | {'MSE_Out':<10} | {'LB_In':<8} | {'LB_Out':<8}")
+print("-" * 90)
 
 for p, q in models_to_estimate:
     model_name = f"ARMA({p},{q})"
-    model = ARIMA(clean_returns, order=(p, 0, q))
+    
+    # ESTIMATE PARAMETERS ON 2024 DATA ONLY
+    model = ARIMA(returns_2024, order=(p, 0, q))
     fitted = model.fit()
     
     params = fitted.params.to_dict()
     std_errors = fitted.bse.to_dict()
-    residuals = fitted.resid
-    aic = fitted.aic
-    bic = fitted.bic
-    loglik = fitted.llf
     converged = fitted.mle_retvals['converged'] if fitted.mle_retvals else False
-
-    # Ljung-Box test
-    lb_test = acorr_ljungbox(residuals.dropna(), lags=10, return_df=True)
-    lb_stat = lb_test['lb_stat'].iloc[-1]
-    lb_pval = lb_test['lb_pvalue'].iloc[-1]
     
-    # Out-of-sample MSE
-    if len(returns_2025) > 0 and fitted is not None:
-        forecast = fitted.forecast(steps=len(returns_2025))
-        mse_out = np.mean((returns_2025.dropna().values - forecast.values[:len(returns_2025.dropna())])**2)
+    # IN-SAMPLE STATISTICS (2024 period)
+    residuals_in = fitted.resid
+    mse_in = np.mean(residuals_in**2)
+    lb_test_in = acorr_ljungbox(residuals_in.dropna(), lags=10, return_df=True)
+    lb_stat_in = lb_test_in['lb_stat'].iloc[-1]
+    lb_pval_in = lb_test_in['lb_pvalue'].iloc[-1]
+    
+    # OUT-OF-SAMPLE STATISTICS (2025 period using 2024 parameters)
+    if len(returns_2025) > max(p, q):  # Need sufficient data
+            # Apply 2024 model to 2025 data to get residuals
+            forecast_model = fitted.apply(returns_2025, refit=False)
+            residuals_out = forecast_model.resid
+            
+            if len(residuals_out) > 10:
+                mse_out = np.mean(residuals_out**2)
+                
+                # Calculate out-of-sample log-likelihood using 2024 parameters
+                sigma2_est = np.var(residuals_in)  # Use in-sample variance estimate
+                n_out = len(residuals_out)
+                loglik_out = -0.5 * n_out * np.log(2 * np.pi * sigma2_est) - 0.5 * np.sum(residuals_out**2) / sigma2_est
+                
+                # Out-of-sample AIC/BIC
+                k = len(fitted.params)
+                aic_out = 2 * k - 2 * loglik_out
+                bic_out = k * np.log(n_out) - 2 * loglik_out
+                
+                # Out-of-sample Ljung-Box
+                lb_test_out = acorr_ljungbox(residuals_out.dropna(), lags=10, return_df=True)
+                lb_stat_out = lb_test_out['lb_stat'].iloc[-1]
+                lb_pval_out = lb_test_out['lb_pvalue'].iloc[-1]
+            else:
+                mse_out = np.nan
+                loglik_out = np.nan
+                aic_out = np.nan
+                bic_out = np.nan
+                lb_stat_out = np.nan
+                lb_pval_out = np.nan
+            
+            mse_out = np.mean(residuals_out**2)
+            
+            # Log-likelihood for out-of-sample
+            sigma2_est = np.var(residuals_in)
+            n_out = len(residuals_out)
+            loglik_out = -0.5 * n_out * np.log(2 * np.pi * sigma2_est) - 0.5 * np.sum(residuals_out**2) / sigma2_est
+            
+            k = len(fitted.params)
+            aic_out = 2 * k - 2 * loglik_out
+            bic_out = k * np.log(n_out) - 2 * loglik_out
+            
+            if len(residuals_out) > 10:
+                lb_test_out = acorr_ljungbox(residuals_out, lags=10, return_df=True)
+                lb_stat_out = lb_test_out['lb_stat'].iloc[-1]
+                lb_pval_out = lb_test_out['lb_pvalue'].iloc[-1]
+            else:
+                lb_stat_out = np.nan
+                lb_pval_out = np.nan
     else:
         mse_out = np.nan
+        loglik_out = np.nan
+        aic_out = np.nan
+        bic_out = np.nan
+        lb_stat_out = np.nan
+        lb_pval_out = np.nan
     
     # Store results
     results[model_name] = {
         'params': params,
         'std_errors': std_errors,
         'converged': converged,
-        'aic': aic,
-        'bic': bic,
-        'loglik': loglik,
-        'mse_in': np.mean(residuals**2),
+        'aic_in': fitted.aic,
+        'bic_in': fitted.bic, 
+        'loglik_in': fitted.llf,
+        'aic_out': aic_out,
+        'bic_out': bic_out,
+        'loglik_out': loglik_out,
+        'mse_in': mse_in,
         'mse_out': mse_out,
-        'lb_stat': lb_stat,
-        'lb_pval': lb_pval
+        'lb_stat_in': lb_stat_in,
+        'lb_pval_in': lb_pval_in,
+        'lb_stat_out': lb_stat_out,
+        'lb_pval_out': lb_pval_out,
+        'fitted_model': fitted
     }
     
     conv_status = "YES" if converged else "NO"
-    print(f"{model_name:<10} | {conv_status:<10} | {aic:<10.2f} | {bic:<10.2f} | {loglik:<10.2f} | {lb_stat:<10.2f} | {lb_pval:<10.3f}")
+    print(f"{model_name:<10} | {conv_status:<5} | {fitted.aic:<10.0f} | {aic_out:<10.0f} | {mse_in:<10.6f} | {mse_out:<10.6f} | {lb_stat_in:<8.2f} | {lb_stat_out:<8.2f}")
 
+# Best models (based on in-sample criteria)
+aic_best = min(results.keys(), key=lambda k: results[k]['aic_in'])
+bic_best = min(results.keys(), key=lambda k: results[k]['bic_in'])
+print(f"\nBest by AIC (In-Sample): {aic_best}")
+print(f"Best by BIC (In-Sample): {bic_best}")
 
-# Best models
-aic_best = min(results.keys(), key=lambda k: results[k]['aic'])
-bic_best = min(results.keys(), key=lambda k: results[k]['bic'])
+# Parameter estimates table
+print(f"\n" + "="*120)
+print("PARAMETER ESTIMATES (with Standard Errors) - Estimated on 2024 Data")
+print("="*120)
 
-print(f"\\nBest by AIC: {aic_best}")
-print(f"Best by BIC: {bic_best}")
+model_order = ['ARMA(0,0)', 'ARMA(0,1)', 'ARMA(0,2)', 'ARMA(1,0)', 
+               'ARMA(1,1)', 'ARMA(1,2)', 'ARMA(2,0)', 'ARMA(2,1)', 'ARMA(2,2)']
 
+# Get parameters
+all_params = set()
+for result in results.values():
+    all_params.update(result['params'].keys())
+
+param_order = ['const', 'ar.L1', 'ar.L2', 'ma.L1', 'ma.L2']
+ordered_params = [p for p in param_order if p in all_params]
+
+# Header
+print(f"{'Parameter':<15}", end="")
+for model in model_order:
+    print(f" | {model:<12}", end="")
+print()
+print("-" * 120)
+
+# Parameters with standard errors
+for param in ordered_params:
+    param_display = {
+        'const': 'Constant', 
+        'ar.L1': 'AR(1)', 
+        'ar.L2': 'AR(2)',
+        'ma.L1': 'MA(1)', 
+        'ma.L2': 'MA(2)'
+    }.get(param, param)
+    
+    print(f"{param_display:<15}", end="")
+    for model in model_order:
+        if param in results[model]['params']:
+            val = results[model]['params'][param]
+            print(f" | {val:>10.6f}  ", end="")
+        else:
+            print(f" | {'--':>10}    ", end="")
+    print()
+    
+    print(f"{'(Std. Error)':<15}", end="")
+    for model in model_order:
+        if param in results[model]['std_errors']:
+            se = results[model]['std_errors'][param]
+            print(f" | ({se:>8.6f}) ", end="")
+        else:
+            print(f" | {'--':>10}    ", end="")
+    print()
+    print()
+
+# Diagnostics table
+print("="*120)
+print("MODEL DIAGNOSTICS - USING 2024 PARAMETERS ON BOTH PERIODS")
+print("="*120)
+
+diagnostics = [
+    ('Convergence', 'converged', 's'),
+    ('Log-Likelihood (In)', 'loglik_in', '.2f'),
+    ('Log-Likelihood (Out)', 'loglik_out', '.2f'),
+    ('AIC (In)', 'aic_in', '.0f'),
+    ('AIC (Out)', 'aic_out', '.0f'),
+    ('BIC (In)', 'bic_in', '.0f'),
+    ('BIC (Out)', 'bic_out', '.0f'),
+    ('MSE (In-Sample)', 'mse_in', '.8f'),
+    ('MSE (Out-Sample)', 'mse_out', '.8f'),
+    ('Ljung-Box Stat (In)', 'lb_stat_in', '.2f'),
+    ('Ljung-Box Stat (Out)', 'lb_stat_out', '.2f'),
+    ('Ljung-Box p-val (In)', 'lb_pval_in', '.4f'),
+    ('Ljung-Box p-val (Out)', 'lb_pval_out', '.4f')
+]
+
+for diag_name, key, fmt in diagnostics:
+    print(f"{diag_name:<22}", end="")
+    for model in model_order:
+        val = results[model][key]
+        if fmt == 's':
+            status = "YES" if val else "NO"
+            print(f" | {status:>10}    ", end="")
+        elif pd.isna(val):
+            print(f" | {'--':>10}    ", end="")
+        else:
+            print(f" | {val:>10{fmt}}  ", end="")
+    print()
+
+print("="*120)
 
 ############################################################## 3.3a (simplified)
 split_date = pd.Timestamp('2025-01-01')
