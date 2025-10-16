@@ -69,7 +69,6 @@ returns = np.log(spy5p_series / spy5p_series.shift(1))*100
 print(f"Shape: {returns.shape}")
 returns_clean = returns.copy()
 
-
 #Look at outliers
 max_return = returns_clean.max()
 min_return = returns_clean.min()
@@ -81,7 +80,7 @@ print(f"Minimum: {min_return:.4f}% at {min_date}")
 # Remove first 3 observations of each trading day 
 daily_groups = returns_clean.groupby(returns_clean.index.date)
 returns_cleaned = pd.concat([group.iloc[3:] for date, group in daily_groups if len(group) > 3])
-
+"""
 print(f"Original returns: {len(returns)} observations")
 print(f"After cleaning: {len(returns_cleaned)} observations")
 print(f"Range: {returns_cleaned.min():.4f}% to {returns_cleaned.max():.4f}%")
@@ -185,7 +184,7 @@ for p, q in models_to_estimate:
     
     # ESTIMATE PARAMETERS ON 2024 DATA ONLY
     model = ARIMA(returns_2024, order=(p, 0, q))
-    fitted = model.fit()
+    fitted = model.fit(cov_type='robust')
     
     params = fitted.params.to_dict()
     std_errors = fitted.bse.to_dict()
@@ -198,62 +197,27 @@ for p, q in models_to_estimate:
     lb_stat_in = lb_test_in['lb_stat'].iloc[-1]
     lb_pval_in = lb_test_in['lb_pvalue'].iloc[-1]
     
-    # OUT-OF-SAMPLE STATISTICS (2025 period using 2024 parameters)
-    if len(returns_2025) > max(p, q):  # Need sufficient data
-            # Apply 2024 model to 2025 data to get residuals
-            forecast_model = fitted.apply(returns_2025, refit=False)
-            residuals_out = forecast_model.resid
-            
-            if len(residuals_out) > 10:
-                mse_out = np.mean(residuals_out**2)
-                
-                # Calculate out-of-sample log-likelihood using 2024 parameters
-                sigma2_est = np.var(residuals_in)  # Use in-sample variance estimate
-                n_out = len(residuals_out)
-                loglik_out = -0.5 * n_out * np.log(2 * np.pi * sigma2_est) - 0.5 * np.sum(residuals_out**2) / sigma2_est
-                
-                # Out-of-sample AIC/BIC
-                k = len(fitted.params)
-                aic_out = 2 * k - 2 * loglik_out
-                bic_out = k * np.log(n_out) - 2 * loglik_out
-                
-                # Out-of-sample Ljung-Box
-                lb_test_out = acorr_ljungbox(residuals_out.dropna(), lags=10, return_df=True)
-                lb_stat_out = lb_test_out['lb_stat'].iloc[-1]
-                lb_pval_out = lb_test_out['lb_pvalue'].iloc[-1]
-            else:
-                mse_out = np.nan
-                loglik_out = np.nan
-                aic_out = np.nan
-                bic_out = np.nan
-                lb_stat_out = np.nan
-                lb_pval_out = np.nan
-            
-            mse_out = np.mean(residuals_out**2)
-            
-            # Log-likelihood for out-of-sample
-            sigma2_est = np.var(residuals_in)
-            n_out = len(residuals_out)
-            loglik_out = -0.5 * n_out * np.log(2 * np.pi * sigma2_est) - 0.5 * np.sum(residuals_out**2) / sigma2_est
-            
-            k = len(fitted.params)
-            aic_out = 2 * k - 2 * loglik_out
-            bic_out = k * np.log(n_out) - 2 * loglik_out
-            
-            if len(residuals_out) > 10:
-                lb_test_out = acorr_ljungbox(residuals_out, lags=10, return_df=True)
-                lb_stat_out = lb_test_out['lb_stat'].iloc[-1]
-                lb_pval_out = lb_test_out['lb_pvalue'].iloc[-1]
-            else:
-                lb_stat_out = np.nan
-                lb_pval_out = np.nan
-    else:
-        mse_out = np.nan
-        loglik_out = np.nan
-        aic_out = np.nan
-        bic_out = np.nan
-        lb_stat_out = np.nan
-        lb_pval_out = np.nan
+    # OUT-OF-SAMPLE STATISTICS (2025 period using fixed 2024 parameters)
+    forecast_model = fitted.apply(returns_2025, refit=False)
+    residuals_out = forecast_model.resid
+    
+    # Out-of-sample MSE
+    mse_out = np.mean(residuals_out**2)
+    
+    # Out-of-sample log-likelihood using 2024 variance estimate
+    sigma2_est = np.var(residuals_in)
+    n_out = len(residuals_out)
+    loglik_out = -0.5 * n_out * np.log(2 * np.pi * sigma2_est) - 0.5 * np.sum(residuals_out**2) / sigma2_est
+    
+    # Out-of-sample AIC/BIC
+    k = len(fitted.params)
+    aic_out = 2 * k - 2 * loglik_out
+    bic_out = k * np.log(n_out) - 2 * loglik_out
+    
+    # Out-of-sample Ljung-Box
+    lb_test_out = acorr_ljungbox(residuals_out.dropna(), lags=10, return_df=True)
+    lb_stat_out = lb_test_out['lb_stat'].iloc[-1]
+    lb_pval_out = lb_test_out['lb_pvalue'].iloc[-1]
     
     # Store results
     results[model_name] = {
@@ -285,7 +249,6 @@ print(f"\nBest by AIC (In-Sample): {aic_best}")
 print(f"Best by BIC (In-Sample): {bic_best}")
 
 # Parameter estimates table
-print(f"\n" + "="*120)
 print("PARAMETER ESTIMATES (with Standard Errors) - Estimated on 2024 Data")
 print("="*120)
 
@@ -772,283 +735,290 @@ plt.grid(True, alpha=0.3)
 plt.show()
 
 
-# GARCH imports
+"""
+
+# Import required libraries for GARCH modeling and diagnostics
 from scipy import stats
-from statsmodels.stats.diagnostic import het_arch
-from arch import arch_model  
+from scipy.stats import jarque_bera
+from statsmodels.stats.diagnostic import het_arch, acorr_ljungbox
+from arch import arch_model
+import matplotlib.pyplot as plt
+import numpy as np
 
 print(f"\n" + "="*60)
 print("SECTION 3.4: GARCH MODELING")
 print("="*60)
 
-# Convert minute returns to daily returns
+# Convert minute-by-minute data to daily returns
 print("\n=== DAILY RETURN CONVERSION ===")
 
-# Get daily closing prices (last price each day)
+# Extract daily closing prices (last observation each trading day)
 daily_prices = spy5p_series.groupby(spy5p_series.index.date).last()
 daily_prices.index = pd.to_datetime(daily_prices.index)
 
-# Calculate daily percentage log returns
+# Calculate daily percentage log returns: r_t = 100 * ln(P_t/P_{t-1})
 daily_returns = np.log(daily_prices / daily_prices.shift(1)) * 100
 daily_returns = daily_returns.dropna()
 
 print(f"Daily prices: {len(daily_prices)} observations")
 print(f"Daily returns: {len(daily_returns)} observations")
 print(f"Date range: {daily_returns.index.min().date()} to {daily_returns.index.max().date()}")
-print(f"Daily return range: {daily_returns.min():.4f}% to {daily_returns.max():.4f}%")
-print(f"Daily return std: {daily_returns.std():.4f}%")
+print(f"Return range: {daily_returns.min():.2f}% to {daily_returns.max():.2f}%")
+print(f"Mean return: {daily_returns.mean():.3f}%, Std dev: {daily_returns.std():.3f}%")
 
-# Basic daily return statistics
-print("\nDaily Return Statistics:")
-print(daily_returns.describe())
+# Identify extreme return events and their dates
+max_return = daily_returns.max()
+min_return = daily_returns.min()
+max_date = daily_returns.idxmax()
+min_date = daily_returns.idxmin()
+print(f"\nExtreme returns:")
+print(f"  Maximum: {max_return:.2f}% on {max_date.date()}")
+print(f"  Minimum: {min_return:.2f}% on {min_date.date()}")
 
-# Test for ARCH effects
-print(f"\n=== ARCH EFFECTS TEST ===")
-arch_test = het_arch(daily_returns.dropna(), maxlag=5)
-print(f"ARCH Test (5 lags):")
-print(f"  LM Statistic: {arch_test[0]:.6f}")
-print(f"  p-value: {arch_test[1]:.6f}")
-print(f"  F-Statistic: {arch_test[2]:.6f}")
-print(f"  F p-value: {arch_test[3]:.6f}")
+# Test for ARCH effects (time-varying volatility)
+print(f"\n=== TESTING FOR TIME-VARYING VOLATILITY ===")
+arch_test = het_arch(daily_returns, maxlag=5)
+print(f"ARCH LM Test (5 lags):")
+print(f"  LM Statistic: {arch_test[0]:.3f}, p-value: {arch_test[1]:.6f}")
+print(f"  F-Statistic: {arch_test[2]:.3f}, p-value: {arch_test[3]:.6f}")
 
-# GARCH Model Estimation
+# Estimate GARCH family models
 print(f"\n=== GARCH MODEL ESTIMATION ===")
 
-# Model combinations: p,q ∈ {1,2} for GARCH and EGARCH (8 models total)
-garch_models = []
+# Define model combinations: GARCH and EGARCH with p,q ∈ {1,2}
+model_specs = []
 for p in [1, 2]:
     for q in [1, 2]:
-        garch_models.append(('GARCH', p, q))
-        garch_models.append(('EGARCH', p, q))
+        model_specs.append(('GARCH', p, q))
+        model_specs.append(('EGARCH', p, q))
 
+# Store estimation results
 garch_results = {}
-
 print(f"\n{'Model':<12} | {'Converged':<10} | {'AIC':<10} | {'BIC':<10} | {'LogLik':<10}")
 print("-" * 65)
 
-for model_type, p, q in garch_models:
+# Estimate each model specification
+for model_type, p, q in model_specs:
     model_name = f"{model_type}({p},{q})"
     
     try:
+        # Configure GARCH or EGARCH model
         if model_type == 'GARCH':
-            # Standard GARCH model
-            model = arch_model(daily_returns.dropna(), vol='Garch', p=p, q=q, 
+            model = arch_model(daily_returns, vol='Garch', p=p, q=q, 
                              mean='Constant', dist='normal', rescale=False)
         else:  # EGARCH
-            # EGARCH model  
-            model = arch_model(daily_returns.dropna(), vol='EGARCH', p=p, q=q,
+            model = arch_model(daily_returns, vol='EGARCH', p=p, q=q,
                              mean='Constant', dist='normal', rescale=False)
         
-        # Fit model
+        # Estimate model parameters
         fitted = model.fit(disp='off', show_warning=False)
         
-        # Extract results
-        converged = fitted.convergence_flag == 0
-        aic = fitted.aic
-        bic = fitted.bic
-        loglik = fitted.loglikelihood
-        
-        # Store results
+        # Extract key results
         garch_results[model_name] = {
             'fitted_model': fitted,
-            'converged': converged,
-            'aic': aic,
-            'bic': bic,
-            'loglik': loglik,
+            'converged': fitted.convergence_flag == 0,
+            'aic': fitted.aic,
+            'bic': fitted.bic,
+            'loglik': fitted.loglikelihood,
             'params': fitted.params,
             'std_errors': fitted.std_err,
             'conditional_volatility': fitted.conditional_volatility
         }
         
-        conv_status = "YES" if converged else "NO"
-        print(f"{model_name:<12} | {conv_status:<10} | {aic:<10.2f} | {bic:<10.2f} | {loglik:<10.2f}")
+        # Display results
+        conv_status = "YES" if fitted.convergence_flag == 0 else "NO"
+        print(f"{model_name:<12} | {conv_status:<10} | {fitted.aic:<10.2f} | {fitted.bic:<10.2f} | {fitted.loglikelihood:<10.2f}")
         
     except Exception as e:
         print(f"{model_name:<12} | ERROR: {str(e)[:40]}")
-        garch_results[model_name] = {'error': str(e)}
 
-# Find best models
-successful_garch = {k: v for k, v in garch_results.items() if 'error' not in v}
+# Identify best performing models
+successful_models = {k: v for k, v in garch_results.items() if v.get('converged', False)}
 
-if successful_garch:
-    aic_best_garch = min(successful_garch.keys(), key=lambda k: successful_garch[k]['aic'])
-    bic_best_garch = min(successful_garch.keys(), key=lambda k: successful_garch[k]['bic'])
-    
-    print(f"\nBest GARCH by AIC: {aic_best_garch}")
-    print(f"Best GARCH by BIC: {bic_best_garch}")
+if successful_models:
+    best_aic = min(successful_models.keys(), key=lambda k: successful_models[k]['aic'])
+    best_bic = min(successful_models.keys(), key=lambda k: successful_models[k]['bic'])
+    print(f"\nBest models:")
+    print(f"  By AIC: {best_aic} (AIC = {successful_models[best_aic]['aic']:.2f})")
+    print(f"  By BIC: {best_bic} (BIC = {successful_models[best_bic]['bic']:.2f})")
 
-# GARCH Results Table
-print(f"\n=== GARCH PARAMETER ESTIMATES ===")
+# Validate the best model using standardized residuals
+print(f"\n=== MODEL VALIDATION: {best_aic} ===")
 
-if successful_garch:
-    models = list(successful_garch.keys())
+if successful_models:
+    best_model = successful_models[best_aic]['fitted_model']
+    std_residuals = best_model.std_resid.dropna()
     
-    # Get all parameter names
-    all_params = set()
-    for res in successful_garch.values():
-        all_params.update(res['params'].index)
+    # Test 1: ARCH effects in standardized residuals (should be none)
+    arch_test_resid = het_arch(std_residuals, maxlag=5)
+    print(f"ARCH LM Test on Standardized Residuals:")
+    print(f"  LM Statistic: {arch_test_resid[0]:.3f}, p-value: {arch_test_resid[1]:.3f}")
     
-    print(f"\n{'Parameter':<15}", end="")
-    for model in models:
-        print(f" | {model:<12}", end="")
-    print()
-    print("-" * (15 + 15 * len(models)))
+    # Test 2: Serial correlation tests
+    lb_levels = acorr_ljungbox(std_residuals, lags=10, return_df=True)
+    lb_squares = acorr_ljungbox(std_residuals**2, lags=10, return_df=True)
     
-    # Parameter estimates
-    for param in sorted(all_params):
-        # Parameter values
-        row = f"{param:<15}"
-        for model in models:
-            if param in successful_garch[model]['params']:
-                val = successful_garch[model]['params'][param]
-                row += f" | {val:>10.6f}  "
-            else:
-                row += f" | {'--':>10}    "
-        print(row)
-        
-        # Standard errors  
-        row = f"{'(SE)':<15}"
-        for model in models:
-            if param in successful_garch[model]['std_errors']:
-                se = successful_garch[model]['std_errors'][param]
-                row += f" | ({se:>8.6f}) "
-            else:
-                row += f" | {'--':>10}    "
-        print(row)
+    print(f"Ljung-Box Tests (10 lags):")
+    print(f"  Levels: LB = {lb_levels['lb_stat'].iloc[-1]:.3f}, p = {lb_levels['lb_pvalue'].iloc[-1]:.3f}")
+    print(f"  Squares: LB = {lb_squares['lb_stat'].iloc[-1]:.3f}, p = {lb_squares['lb_pvalue'].iloc[-1]:.3f}")
+    
+    # Test 3: Normality test
+    jb_stat, jb_pval = jarque_bera(std_residuals)
+    print(f"Jarque-Bera Normality Test:")
+    print(f"  JB Statistic: {jb_stat:.3f}, p-value: {jb_pval:.6f}")
 
-# Model diagnostics
-print(f"\n=== GARCH MODEL DIAGNOSTICS ===")
-
-if successful_garch:
-    print(f"\n{'Diagnostic':<15}", end="")
-    for model in models:
-        print(f" | {model:<12}", end="")
-    print()
-    print("-" * (15 + 15 * len(models)))
+    # Generate diagnostic plots for standardized residuals
+    print(f"\n=== RESIDUAL DIAGNOSTICS PLOTS ===")
     
-    diagnostics = [
-        ('Converged', 'converged', 's'),
-        ('AIC', 'aic', '.2f'),
-        ('BIC', 'bic', '.2f'),
-        ('Log-Likelihood', 'loglik', '.2f')
-    ]
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
     
-    for diag_name, key, fmt in diagnostics:
-        row = f"{diag_name:<15}"
-        for model in models:
-            val = successful_garch[model][key]
-            if fmt == 's':
-                status = "YES" if val else "NO" 
-                row += f" | {status:>10}    "
-            else:
-                row += f" | {val:>10{fmt}}  "
-        print(row)
-
-# Calculate Realized Volatility from intraday returns
-print(f"\n=== REALIZED VOLATILITY CALCULATION ===")
-
-# Use cleaned minute returns for RV calculation
-intraday_returns = returns_cleaned.copy()
-
-# Calculate daily realized volatility (sum of squared intraday returns)
-daily_rv = intraday_returns.groupby(intraday_returns.index.date).apply(lambda x: (x**2).sum())
-daily_rv.index = pd.to_datetime(daily_rv.index)
-daily_rv = daily_rv.dropna()
-
-print(f"Realized Volatility series: {len(daily_rv)} observations")
-print(f"RV range: {daily_rv.min():.6f} to {daily_rv.max():.6f}")
-print(f"RV mean: {daily_rv.mean():.6f}")
-
-# Align dates for comparison (common dates only)
-if successful_garch:
-    # Get best GARCH and EGARCH models
-    best_garch_name = aic_best_garch
-    best_egarch_name = None
+    # Left panel: Histogram vs normal distribution
+    ax1.hist(std_residuals.values, bins=50, density=True, alpha=0.7, 
+             color='lightblue', edgecolor='black', linewidth=0.5)
     
-    # Find best EGARCH
-    egarch_models = {k: v for k, v in successful_garch.items() if k.startswith('EGARCH')}
-    if egarch_models:
-        best_egarch_name = min(egarch_models.keys(), key=lambda k: egarch_models[k]['aic'])
+    # Overlay standard normal curve for comparison
+    x_range = np.linspace(std_residuals.min(), std_residuals.max(), 100)
+    normal_curve = stats.norm.pdf(x_range, 0, 1)
+    ax1.plot(x_range, normal_curve, 'red', linewidth=2.5, label='Standard Normal')
     
-    print(f"\nBest GARCH model: {best_garch_name}")
-    if best_egarch_name:
-        print(f"Best EGARCH model: {best_egarch_name}")
-    
-    # Extract conditional volatilities (convert to variance by squaring)
-    garch_vol = successful_garch[best_garch_name]['conditional_volatility']
-    garch_var = garch_vol ** 2
-    
-    if best_egarch_name:
-        egarch_vol = successful_garch[best_egarch_name]['conditional_volatility'] 
-        egarch_var = egarch_vol ** 2
-    
-    # Align all series to common dates
-    common_dates = daily_rv.index.intersection(garch_var.index)
-    
-    if len(common_dates) > 0:
-        rv_aligned = daily_rv.loc[common_dates]
-        garch_aligned = garch_var.loc[common_dates] 
-        
-        print(f"\nCommon observations for comparison: {len(common_dates)}")
-        print(f"Date range: {common_dates.min().date()} to {common_dates.max().date()}")
-        
-        # Summary statistics comparison
-        print(f"\nVariance Comparison:")
-        print(f"  Realized Variance:  Mean={rv_aligned.mean():.6f}, Std={rv_aligned.std():.6f}")
-        print(f"  GARCH Variance:     Mean={garch_aligned.mean():.6f}, Std={garch_aligned.std():.6f}")
-        
-        if best_egarch_name:
-            egarch_aligned = egarch_var.loc[common_dates]
-            print(f"  EGARCH Variance:    Mean={egarch_aligned.mean():.6f}, Std={egarch_aligned.std():.6f}")
-
-print(f"\n" + "="*60)
-print("GARCH ANALYSIS COMPLETE")
-print("="*60)
-
-# 1. PLOT GARCH vs EGARCH vs RV
-print(f"\n=== VOLATILITY COMPARISON PLOTS ===")
-
-if successful_garch and len(common_dates) > 0:
-    # Get data for plotting
-    rv_plot = daily_rv.loc[common_dates]
-    garch_plot = successful_garch[best_garch_name]['conditional_volatility'].loc[common_dates] ** 2
-    egarch_plot = successful_garch[best_egarch_name]['conditional_volatility'].loc[common_dates] ** 2
-    
-    # Create comparison plot
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10))
-    
-    # Top panel: Time series
-    ax1.plot(common_dates, rv_plot.values, label='Realized Variance', alpha=0.7, linewidth=1)
-    ax1.plot(common_dates, garch_plot.values, label=f'{best_garch_name} Variance', alpha=0.8, linewidth=1.2)
-    ax1.plot(common_dates, egarch_plot.values, label=f'{best_egarch_name} Variance', alpha=0.8, linewidth=1.2)
-    ax1.set_title('Variance Comparison: GARCH vs EGARCH vs Realized Variance')
-    ax1.set_ylabel('Variance')
+    ax1.set_title('Standardized Residuals vs Normal Distribution', fontweight='bold')
+    ax1.set_xlabel('Standardized Residuals')
+    ax1.set_ylabel('Density')
     ax1.legend()
     ax1.grid(True, alpha=0.3)
     
-    # Bottom panel: Scatter plot RV vs GARCH
-    ax2.scatter(rv_plot.values, garch_plot.values, alpha=0.6, s=20, label=f'{best_garch_name}', color='red')
-    ax2.scatter(rv_plot.values, egarch_plot.values, alpha=0.6, s=20, label=f'{best_egarch_name}', color='blue')
+    # Right panel: Quantile-Quantile plot
+    n_obs = len(std_residuals)
+    sorted_residuals = np.sort(std_residuals.values)
     
-    # 45-degree line (perfect fit)
-    min_val = 0
-    max_val = 15
-    ax2.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.5, label='Perfect Fit')
+    # Right panel: Simple Q-Q plot
+    from scipy import stats as scipy_stats
     
-    ax2.set_xlabel('Realized Variance')
-    ax2.set_ylabel('Model Variance')
-    ax2.set_title('Model vs Realized Variance Scatter')
-    ax2.legend()
+    # Use scipy's probplot function for standard Q-Q plot
+    scipy_stats.probplot(std_residuals.values, dist="norm", plot=ax2)
+    
+    ax2.set_title('Q-Q Plot: Sample vs Theoretical Normal', fontweight='bold')
+    ax2.set_xlabel('Theoretical Normal Quantiles')
+    ax2.set_ylabel('Sample Quantiles')
     ax2.grid(True, alpha=0.3)
     
     plt.tight_layout()
     plt.show()
     
-    # Calculate correlations
-    corr_garch_rv = rv_plot.corr(garch_plot)
-    corr_egarch_rv = rv_plot.corr(egarch_plot)
+    # Summary statistics for standardized residuals
+    skewness = stats.skew(std_residuals)
+    kurtosis = stats.kurtosis(std_residuals, fisher=False)  # Regular kurtosis
+    excess_kurtosis = stats.kurtosis(std_residuals, fisher=True)  # Excess kurtosis
     
-    print(f"Correlations with Realized Variance:")
-    print(f"  {best_garch_name}: {corr_garch_rv:.4f}")
-    print(f"  {best_egarch_name}: {corr_egarch_rv:.4f}")
+    print(f"\nStandardized Residuals Summary:")
+    print(f"  Mean: {std_residuals.mean():.4f}, Std Dev: {std_residuals.std():.4f}")
+    print(f"  Skewness: {skewness:.3f}, Kurtosis: {kurtosis:.3f} (Excess: {excess_kurtosis:.3f})")
+    print(f"  Range: {std_residuals.min():.2f} to {std_residuals.max():.2f}")
+
+# Calculate realized volatility for model comparison
+print(f"\n=== REALIZED VOLATILITY COMPARISON ===")
+
+# Construct realized volatility from minute-by-minute returns
+daily_realized_vol = returns_clean.groupby(returns_clean.index.date).apply(lambda x: (x**2).sum())
+daily_realized_vol.index = pd.to_datetime(daily_realized_vol.index)
+daily_realized_vol = daily_realized_vol.dropna()
+
+print(f"Realized volatility series: {len(daily_realized_vol)} observations")
+print(f"RV range: {daily_realized_vol.min():.4f} to {daily_realized_vol.max():.4f}")
+
+if successful_models:
+    # Get best GARCH and EGARCH models for comparison
+    best_garch = best_aic
+    egarch_models = {k: v for k, v in successful_models.items() if k.startswith('EGARCH')}
+    best_egarch = min(egarch_models.keys(), key=lambda k: egarch_models[k]['aic']) if egarch_models else None
+    
+    # Calculate correlations with realized volatility
+    garch_variance = successful_models[best_garch]['conditional_volatility'] ** 2
+    common_dates = daily_realized_vol.index.intersection(garch_variance.index)
+    
+    if len(common_dates) > 0:
+        rv_common = daily_realized_vol.loc[common_dates]
+        garch_common = garch_variance.loc[common_dates]
+        
+        garch_correlation = rv_common.corr(garch_common)
+        
+        print(f"\nModel Performance vs Realized Volatility:")
+        print(f"  {best_garch}: correlation = {garch_correlation:.4f}")
+        
+        if best_egarch:
+            egarch_variance = successful_models[best_egarch]['conditional_volatility'] ** 2
+            egarch_common = egarch_variance.loc[common_dates]
+            egarch_correlation = rv_common.corr(egarch_common)
+            print(f"  {best_egarch}: correlation = {egarch_correlation:.4f}")
+            
+            # Create volatility comparison plot
+            print(f"\n=== VOLATILITY COMPARISON PLOT ===")
+            
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 13))
+            
+            # Top panel: Time series comparison (cropped at 20 for visibility)
+            ax1.plot(common_dates, rv_common.values, label='Realized Variance', 
+                    alpha=0.7, linewidth=1)
+            ax1.plot(common_dates, garch_common.values, label=f'{best_garch} Variance', 
+                    alpha=0.8, linewidth=1.2)
+            ax1.plot(common_dates, egarch_common.values, label=f'{best_egarch} Variance', 
+                    alpha=0.8, linewidth=1.2)
+            
+            ax1.set_title('Variance Model Comparison: GARCH vs EGARCH vs Realized Variance')
+            ax1.set_ylabel('Variance')
+            ax1.set_ylim(0, 20)  # Focus on main dynamics, crop extreme outliers
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            
+            # Bottom panel: Scatter plot (zoomed to 95th percentile)
+            max_plot_value = min(
+                np.percentile(rv_common.values, 95),
+                np.percentile(garch_common.values, 95), 
+                4.0  # Cap for readability
+            )
+            
+            ax2.scatter(rv_common.values, garch_common.values, alpha=0.6, s=20, 
+                       label=f'{best_garch} (ρ={garch_correlation:.3f})', color='red')
+            ax2.scatter(rv_common.values, egarch_common.values, alpha=0.6, s=20, 
+                       label=f'{best_egarch} (ρ={egarch_correlation:.3f})', color='blue')
+            
+            # Add perfect fit reference line
+            ax2.plot([0, max_plot_value], [0, max_plot_value], 'k--', alpha=0.5, label='Perfect Fit')
+            
+            ax2.set_xlim(0, max_plot_value)
+            ax2.set_ylim(0, max_plot_value)
+            ax2.set_xlabel('Realized Variance')
+            ax2.set_ylabel('Model Variance')
+            ax2.set_title('Model vs Realized Variance (95th Percentile View)')
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            plt.show()
+
+# Use the same minute-by-minute cleaned returns from Section 3.2
+minute_returns = returns_cleaned  # Cleaned minute returns
+
+# Step 1: Estimate ARIMA(0,0,1) = MA(1) to get residuals
+ma_model = ARIMA(minute_returns, order=(0, 0, 1))
+ma_fitted = ma_model.fit()
+
+# Extract residuals (these are the "demeaned" returns for GARCH)
+ma_residuals = ma_fitted.resid.dropna()
+
+print(f"MA(1) coefficient: {ma_fitted.params['ma.L1']:.6f}")
+print(f"MA(1) AIC: {ma_fitted.aic:.0f}")
+
+# Step 2: Apply GARCH to the MA residuals
+ma_garch_model = arch_model(ma_residuals, mean='Zero', vol='GARCH', p=1, q=1, rescale=False)
+ma_garch_fitted = ma_garch_model.fit(disp='off')
+
+ma_egarch_model = arch_model(ma_residuals, mean='Zero', vol='EGARCH', p=1, q=1, rescale=False)  
+ma_egarch_fitted = ma_egarch_model.fit(disp='off')
+
+print(f"\n=== MA(1) + GARCH RESULTS ===")
+print(f"Original ARMA(0,1): AIC = -622,917")
+print(f"MA(1)-GARCH(1,1):   AIC = {ma_fitted.aic + ma_garch_fitted.aic:.0f}")
+print(f"MA(1)-EGARCH(1,1):  AIC = {ma_fitted.aic + ma_egarch_fitted.aic:.0f}")
+
 
