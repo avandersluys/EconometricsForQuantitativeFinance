@@ -334,357 +334,220 @@ for diag_name, key, fmt in diagnostics:
     print()
 
 print("="*120)
-
-############################################################## 3.3a (simplified)
-split_date = pd.Timestamp('2025-01-01')
-print("\n=== QUESTION 3.3a — VAR(5) on returns (simplified) ===")
-
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from itertools import combinations
+from scipy import stats
+from scipy.stats import norm
 from statsmodels.tsa.api import VAR
+from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.tsa.vector_ar.vecm import coint_johansen, VECM
 
-# 1) Two parallel listings of the same ETF
-symbols_var = ['SPY5.P', 'SPY5z.CHIX']
-prices = df[symbols_var]
+path = "/Users/alexandervds/Documents/GitHub/EconometricsForQuantitativeFinance/Case2/sp_9.csv"
+cols = ["SPX5.L","SPY5z.CHIX","SPY5.P"]
+session_start, session_end = "09:00", "17:30"
+p_assign = 5
+p_min, p_max = 1, 15
+nlags = 10
+split_date = pd.Timestamp("2025-01-01")
+COINTEG_FREQ = "10min"
 
-# 2) Minute log-returns (I(0))
-R = np.log(prices).diff().dropna()
+df = pd.read_csv(path, parse_dates=["DateTime"]).set_index("DateTime").sort_index()
+prices = df[cols].astype(float).where(lambda x: x > 0).dropna(how="any")
+prices = prices.between_time(session_start, session_end)
 
-# 3) Split (uses split_date defined above)
-R_in  = R[R.index < split_date]
-R_out = R[R.index >= split_date]
+def intraday_logret(g):
+    r = np.log(g).diff()
+    r.iloc[0] = np.nan
+    return r
 
-print(f"Series: {symbols_var}")
-print(f"In-sample:  {R_in.index[0]} → {R_in.index[-1]}  (n={len(R_in):,})")
-print(f"Out-sample: {R_out.index[0]} → {R_out.index[-1]} (n={len(R_out):,})")
+rets = prices.groupby(prices.index.date, group_keys=False).apply(intraday_logret)
+rets = rets.replace([np.inf, -np.inf], np.nan).dropna(how="any").astype(float)
 
-# 4) Fit VAR(5) with constant
-p = 5
-res = VAR(R_in).fit(p, trend='c')
+pos_in_day = rets.groupby(rets.index.date).cumcount()
+p_max_block = p_max
+rets_fs = rets.mask(pos_in_day < p_max_block).dropna(how="any").copy()
 
-print("\nVAR(5) — key fit stats")
-print(f"  LLF: {res.llf:.2f}")
-print(f"  AIC: {res.aic:.6f}   BIC: {res.bic:.6f}   HQIC: {res.hqic:.6f}")
+rets_train = rets_fs.loc[rets_fs.index < split_date]
+rets_test  = rets_fs.loc[rets_fs.index >= split_date]
 
-# 5) Compact table: coefficients + standard errors (+ t, p)
-#    (one tidy table; easy to copy to the report)
-params = res.params.copy()      # rows = equations, cols = ['const','L1.SPY5.P',...]
-bse    = res.stderr.copy()
-tvals  = res.tvalues.copy()
-pvals  = res.pvalues.copy()
-
-tidy = []
-for eq in params.index:             # equation (dependent var)
-    for term in params.columns:     # parameter name
-        tidy.append({
-            'equation': eq,
-            'parameter': term,
-            'beta': params.loc[eq, term],
-            'se':   bse.loc[eq, term],
-            't':    tvals.loc[eq, term],
-            'p':    pvals.loc[eq, term]
-        })
-coef_table = (pd.DataFrame(tidy)
-              .loc[:, ['equation','parameter','beta','se','t','p']]
-              .sort_values(['equation','parameter']))
-
-# Nice rounding for printing
-def fmt(s, nd=6): return s.map(lambda x: f"{x:.{nd}f}")
-show = coef_table.copy()
-show['beta'] = fmt(show['beta'], 6)
-show['se']   = fmt(show['se'],   6)
-show['t']    = fmt(show['t'],    2)
-show['p']    = show['p'].map(lambda x: f"{x:.3g}")
-
-print("\nParameter estimates (β) with standard errors (se)")
-print(show.to_string(index=False))
-
-# 6) In-sample residual diagnostics
-resid = res.resid
-mse_in = (resid**2).mean()
-
-print("\nIn-sample MSE by equation")
-for s in resid.columns:
-    print(f"  {s}: {mse_in[s]:.4e}")
-
-print("\nResidual Ljung–Box Q (lag 10)")
-for s in resid.columns:
-    lb = acorr_ljungbox(resid[s], lags=[10], return_df=True)
-    print(f"  {s}: Q={lb['lb_stat'].iloc[-1]:.2f}, p={lb['lb_pvalue'].iloc[-1]:.3f}")
-
-print("\nResidual contemporaneous correlation")
-print(resid.corr())
-
-# 7) Optional: quick OOS MSE with static multi-step forecast (no refit/rolling)
-if len(R_out) > 0:
-    try:
-        steps = len(R_out)
-        fcst = res.forecast(y=R_in.values[-res.k_ar:], steps=steps)
-        fcst_df = pd.DataFrame(fcst, index=R_out.index, columns=R_out.columns)
-        mse_out = ((R_out - fcst_df)**2).mean()
-        print("\nOut-of-sample MSE (static multi-step forecast)")
-        for s in mse_out.index:
-            print(f"  {s}: {mse_out[s]:.4e}")
-    except Exception as e:
-        print("OOS MSE not computed:", e)
-
-# 8) One-line lag order hint (AIC/BIC/HQIC) to discuss whether p=5 is reasonable
-try:
-    order_sel = VAR(R_in).select_order(maxlags=10)
-    print("\nLag order suggestion (IC minima)")
-    print(order_sel.summary())
-except Exception:
-    pass
-
-
-print("\n=== QUESTION 3.3b — Significance & Cross-effects ===")
-
-# --- Collect coefficients, SEs, t, p for a tidy table
-params = res.params.copy()        # DataFrame: rows = equations, cols = coeffs (const, L1.x, ... or x.L1)
-bse    = res.stderr.copy()
-tvals  = res.tvalues.copy()
-pvals  = res.pvalues.copy()
-
-# Build long-format table with nice labels and significance stars
-def stars(p):
-    return '***' if p < 0.01 else '**' if p < 0.05 else '*' if p < 0.10 else ''
-
-# --- Robust coefficient label parser (supports both label styles)
-import re
-def parse_coef_label(coef: str, eq_name: str):
-    
-    #Returns (lag:int, src:str, kind:str) for a VAR coefficient label.
-    #Supports both 'Lk.SYMBOL' and 'SYMBOL.Lk' styles. 'const' -> (0, '-', 'intercept')
-    
-    if coef == 'const':
-        return 0, '-', 'intercept'
-
-    # Style A: 'L3.SPY5.P'
-    m = re.match(r'^L(\d+)\.(.+)$', coef)
-    if m:
-        lag = int(m.group(1))
-        src = m.group(2)
-        kind = 'own-lag' if src == eq_name else 'cross-lag'
-        return lag, src, kind
-
-    # Style B: 'SPY5.P.L3'
-    m = re.match(r'^(.+)\.L(\d+)$', coef)
-    if m:
-        src = m.group(1)
-        lag = int(m.group(2))
-        kind = 'own-lag' if src == eq_name else 'cross-lag'
-        return lag, src, kind
-
-    # Fallback: unknown formatting
-    return np.nan, coef, 'other'
-
-long_rows = []
-for eq in params.index:                 # equation/dependent variable names
-    for coef in params.columns:         # 'const', 'L1.SPY5.P' OR 'SPY5.P.L1', etc.
-        b = params.loc[eq, coef]
-        se = bse.loc[eq, coef]
-        t = tvals.loc[eq, coef]
-        p = pvals.loc[eq, coef]
-        lag, src, kind = parse_coef_label(coef, eq)
-        long_rows.append({
-            'equation': eq,
-            'term': coef,
-            'source_var': src,
-            'lag': lag,
-            'type': kind,
-            'beta': b,
-            'stderr': se,
-            't': t,
-            'p': p,
-            'sig': stars(p)
-        })
-
-coef_df = (pd.DataFrame(long_rows)
-           .sort_values(['equation','type','lag','source_var'], na_position='last'))
-
-# Pretty print per equation
-for dep in coef_df['equation'].unique():
-    sub = coef_df[coef_df['equation']==dep].copy()
-    print(f"\n--- Coefficient table for equation: {dep} ---")
-    # columns to show
-    show = sub[['term','type','source_var','lag','beta','stderr','t','p','sig']].copy()
-    # nice rounding
-    show['beta']   = show['beta'].map(lambda x: f"{x: .6f}")
-    show['stderr'] = show['stderr'].map(lambda x: f"{x: .6f}")
-    show['t']      = show['t'].map(lambda x: f"{x: .2f}")
-    show['p']      = show['p'].map(lambda x: f"{x: .3g}")
-    # add significance stars right next to beta
-    show['beta±']  = show['beta'] + show['sig']
-    show = show.drop(columns=['beta','sig'])
-    show = show.rename(columns={'term':'parameter','source_var':'from','lag':'L'})
-    # order and print
-    show = show[['parameter','type','from','L','beta±','stderr','t','p']]
-    print(show.to_string(index=False))
-
-# --- Summarise cross-effects: how many and which lags are significant?
-alpha = 0.05
-cross_sig = coef_df[(coef_df['type']=='cross-lag') & (coef_df['p']<alpha)].copy()
-if cross_sig.empty:
-    print("\nCross-effects: None significant at 5% level.")
-else:
-    print("\nCross-effects (p<0.05):")
-    # aggregate by direction
-    summary = (cross_sig
-               .assign(direction = cross_sig['source_var'] + " → " + cross_sig['equation'])
-               .groupby(['direction','lag'])
-               .apply(lambda g: f"β≈{g['beta'].mean():.4g} (avg)")
-               .reset_index(name='coef_info'))
-    for direction in summary['direction'].unique():
-        chunk = summary[summary['direction']==direction]
-        # guard against any NaN lags
-        lags  = ", ".join([f"L{int(L)} {info}" for L, info in zip(chunk['lag'], chunk['coef_info']) if pd.notnull(L)])
-        print(f"  {direction}: {lags}")
-
-# --- Who drives whom? Granger causality tests (per slides)
-#     H0: past of X does NOT help predict Y (reject => X Granger-causes Y)
-#     Use same lag length p as in the fitted VAR
-p_gr = res.k_ar
-series = list(R_in.columns)
-
-def granger(direction_y, direction_x):
-    # Does X -> Y ?
-    res = res.test_causality(caused=direction_y, causing=[direction_x], kind='f')
-    return {'caused': direction_y, 'causing': direction_x,
-            'stat': float(res.statistic), 'pval': float(res.pvalue), 'df': tuple(res.df)}
-
-print("\nGranger causality (F-tests, lag length = %d):" % p_gr)
-gc_rows = []
-for y in series:
-    for x in series:
-        if x == y: 
-            continue
-        try:
-            gc_rows.append(granger(y, x))
-        except Exception:
-            gc_rows.append({'caused': y, 'causing': x, 'stat': np.nan, 'pval': np.nan, 'df': None})
-
-gc_df = pd.DataFrame(gc_rows)
-for _, r in gc_df.iterrows():
-    verdict = "YES (reject H0)" if (r['pval'] < 0.05) else "no"
-    print(f"  {r['causing']} ⇒ {r['caused']}: F={r['stat']:.2f}, p={r['pval']:.3g}  → Granger-cause: {verdict}")
-
-# Quick directional summary
-drivers = (gc_df
-           .assign(drives=lambda d: np.where(d['pval']<0.05, 1, 0))
-           .groupby('causing')['drives'].sum())
-if len(drivers)>0:
-    top_driver = drivers.sort_values(ascending=False).index[0]
-    print(f"\nDirectionality summary: strongest Granger ‘driver’ (count of significant targets) → {top_driver}")
-
-
-print("\n=== QUESTION 3.3c — Residual diagnostics & zero-correlation check ===")
-
-# Grab residuals from your fitted VAR (already computed above as `resid`)
-resid = res.resid.copy()
-eq_names = list(resid.columns)
-nT = len(resid)
-
-# ---------- 1) Normality-ish visuals (hist + QQ) ----------
-import scipy.stats as st
-
-fig, axes = plt.subplots(2, 2, figsize=(12, 9))
-for j, s in enumerate(eq_names):
-    axh = axes[j, 0]
-    axq = axes[j, 1]
-    rj = resid[s].values
-
-    # histogram + normal fit line
-    axh.hist(rj, bins=60, density=True, alpha=0.6)
-    mu, sd = np.mean(rj), np.std(rj)
-    xs = np.linspace(mu-4*sd, mu+4*sd, 201)
-    axh.plot(xs, st.norm.pdf(xs, mu, sd), lw=1.2)
-    axh.set_title(f"{s} residuals: hist + N({mu:.2e},{sd:.2e})")
-    axh.grid(True, alpha=0.3)
-
-    # QQ-plot vs normal
-    osm, osr = st.probplot(rj, dist="norm")[:2]  # returns (theoretical, ordered), (slope, intercept, r)
-    st.probplot(rj, dist="norm", plot=axq)
-    axq.set_title(f"{s} residuals: QQ-normal")
-    axq.grid(True, alpha=0.3)
-
-plt.tight_layout()
-plt.show()
-
-# ---------- 2) Per-equation whiteness already checked via Ljung–Box above ----------
-# (kept for context in the report)
-
-# ---------- 3) Contemporaneous correlation: test ρ=0 ----------
-r = float(resid.corr().iloc[0,1])
-t_stat = r * np.sqrt((nT - 2) / (1 - r**2))
-p_val = 2 * (1 - st.t.cdf(abs(t_stat), df=nT-2))
-
-# 95% CI using Fisher z-transform
-z = np.arctanh(np.clip(r, -0.999999, 0.999999))
-se_z = 1 / np.sqrt(nT - 3)
-z_lo, z_hi = z - 1.96*se_z, z + 1.96*se_z
-ci_lo, ci_hi = np.tanh([z_lo, z_hi])
-
-print("\nZero-correlation (lag 0) test for residuals:")
-print(f"  Corr({eq_names[0]}, {eq_names[1]}) = {r:.6f}")
-print(f"  t = {t_stat:.2f},  p = {p_val:.3g}  (H0: rho=0)")
-print(f"  95% CI for rho: [{ci_lo:.6f}, {ci_hi:.6f}]")
-
-# ---------- 4) Scatter of residuals (visual quick check on Σ_u off-diagonal) ----------
-plt.figure(figsize=(6,5))
-plt.scatter(resid[eq_names[0]], resid[eq_names[1]], s=3, alpha=0.2)
-m, b = np.polyfit(resid[eq_names[0]], resid[eq_names[1]], 1)
-xs = np.linspace(resid[eq_names[0]].min(), resid[eq_names[0]].max(), 100)
-plt.plot(xs, m*xs + b, lw=1)
-plt.title(f"Residual scatter: {eq_names[0]} vs {eq_names[1]} (r={r:.3f})")
-plt.xlabel(eq_names[0]); plt.ylabel(eq_names[1])
-plt.grid(True, alpha=0.3)
-plt.tight_layout()
-plt.show()
-
-# ---------- 5) Cross-correlation function (CCF) with 95% bands ----------
-max_lag = 10
-x = resid[eq_names[0]].values
-y = resid[eq_names[1]].values
-
-def ccf(x, y, L):
-    x = x - x.mean(); y = y - y.mean()
-    denom = np.sqrt(np.sum(x**2) * np.sum(y**2))
+def ic_select(data, p_min=1, p_max=15, trend="c"):
+    m = VAR(data)
     out = []
-    for k in range(-L, L+1):
-        if k >= 0:
-            num = np.sum(x[k:] * y[:len(y)-k])
-        else:
-            num = np.sum(x[:len(x)+k] * y[-k:])
-        out.append(num / denom)
-    return np.array(out)
+    for p in range(p_min, p_max + 1):
+        res = m.fit(p, trend=trend)
+        out.append({"p": p, "AIC": res.aic, "BIC": res.bic, "HQIC": res.hqic, "nobs": int(res.nobs)})
+    df_ic = pd.DataFrame(out).sort_values("p")
+    p_bic = int(df_ic.loc[df_ic["BIC"].idxmin(), "p"])
+    return df_ic, p_bic
 
-cc = ccf(x, y, max_lag)
-lags = np.arange(-max_lag, max_lag+1)
-# Approximate 95% band for zero CCF under independence: ±1.96/sqrt(T)
-band = 1.96 / np.sqrt(nT)
+ic_train, p_train = ic_select(rets_train, p_min, p_max)
+print("\n[3.3.1] TRAIN (2024) Information criteria:")
+print(ic_train)
+print(f"[3.3.1] TRAIN (2024) BIC-selected p: {p_train}")
 
-plt.figure(figsize=(10,4))
-plt.stem(lags, cc)
-plt.axhline(band, ls='--', lw=1); plt.axhline(-band, ls='--', lw=1)
-plt.axhline(0, color='k', lw=0.8)
-plt.title(f"Residual cross-correlation (±95% ~ {band:.3f})")
-plt.xlabel("Lag (y leads >0)"); plt.ylabel("CCF")
-plt.tight_layout()
+if len(rets_test) > p_max:
+    ic_test, p_test = ic_select(rets_test, p_min, p_max)
+    print("\n[3.3.1] TEST (2025) Information criteria (info only):")
+    print(ic_test)
+    print(f"[3.3.1] TEST (2025) BIC-selected p (info only): {p_test}")
+
+model_fs = VAR(rets_fs)
+res = model_fs.fit(p_assign, trend="c")
+print("\n[3.3.2] VAR(p=5) summary (statsmodels):")
+print(res.summary())
+
+logP_thin = np.log(prices.resample(COINTEG_FREQ).last()).dropna(how="any")
+k_ar_diff = p_assign - 1
+
+cj = coint_johansen(logP_thin, det_order=0, k_ar_diff=k_ar_diff)
+johansen_report = pd.DataFrame({
+    "eigenvalue": cj.eig,
+    "trace_stat": cj.lr1,
+    "trace_crit_90": cj.cvt[:,0],
+    "trace_crit_95": cj.cvt[:,1],
+    "trace_crit_99": cj.cvt[:,2],
+})
+print(f"\n[3.3.2b] Johansen trace test on {COINTEG_FREQ} log-prices (det_order=0, k_ar_diff={k_ar_diff}):")
+print(johansen_report)
+
+k = logP_thin.shape[1]
+r_raw = int((cj.lr1 > cj.cvt[:,1]).sum())
+r = min(r_raw, k - 1)
+print(f"[3.3.2b] Estimated cointegration rank at 95% (capped at k-1): r = {r} (raw count = {r_raw})")
+
+if r > 0:
+    vecm = VECM(logP_thin, k_ar_diff=k_ar_diff, coint_rank=r, deterministic="co")
+    vecm_res = vecm.fit()
+    print("\n[3.3.2b] VECM summary (thinned series):")
+    print(vecm_res.summary())
+    alpha = pd.DataFrame(vecm_res.alpha, index=cols, columns=[f"alpha_{i+1}" for i in range(r)])
+    beta  = pd.DataFrame(vecm_res.beta,  index=cols, columns=[f"beta_{i+1}"  for i in range(r)])
+    print("\n[3.3.2b] Alpha (error-correction speeds):")
+    print(alpha)
+    print("\n[3.3.2b] Beta (cointegrating vectors):")
+    print(beta)
+else:
+    print("\n[3.3.2b] Johansen rank r = 0 at 95%; VECM not estimated.")
+
+u = pd.DataFrame(res.resid, index=rets_fs.index, columns=rets_fs.columns)
+
+print("\n[3.3.3] Residual diagnostics:")
+print(f"\nVAR whiteness test (all residuals, nlags={nlags}):")
+print(res.test_whiteness(nlags=nlags))
+
+print(f"\nLjung–Box p-values per equation (lags={nlags}):")
+for c in u.columns:
+    pval = acorr_ljungbox(u[c].dropna(), lags=[nlags], return_df=True)["lb_pvalue"].iloc[0]
+    print(f"{c}: {pval:.4g}")
+
+print("\nJarque–Bera normality p-values per equation:")
+for c in u.columns:
+    jb = stats.jarque_bera(u[c].dropna())
+    print(f"{c}: {jb.pvalue:.4g}")
+
+def corr_pval(x, y):
+    x = np.asarray(x); y = np.asarray(y)
+    m = np.isfinite(x) & np.isfinite(y)
+    x = x[m]; y = y[m]
+    r = np.corrcoef(x, y)[0,1]
+    n = len(x)
+    t = r * np.sqrt((n - 2) / max(1e-12, (1 - r**2)))
+    p = 2 * (1 - stats.t.cdf(abs(t), df=n - 2))
+    return r, p, n
+
+print("\nContemporaneous residual correlations (H0: rho=0):")
+for a, b in combinations(u.columns, 2):
+    r, p, n = corr_pval(u[a], u[b])
+    approx_zero = ("yes" if (abs(r) < 0.05 and p > 0.1) else "no")
+    print(f"{a} vs {b}: r={r:+.3f}, p={p:.4g}, n={n}, approx_zero? {approx_zero}")
+
+fig, axes = plt.subplots(len(u.columns), 1, figsize=(10, 6), sharex=True)
+if len(u.columns) == 1:
+    axes = [axes]
+for i, c in enumerate(u.columns):
+    axes[i].plot(u.index, u[c].values)
+    axes[i].axhline(0.0, linestyle="--", linewidth=1)
+    axes[i].set_ylabel(c)
+axes[-1].set_xlabel("Time")
+fig.suptitle("VAR Residuals (per series) — full sample")
+fig.tight_layout()
 plt.show()
 
-# ---------- 6) Quick multivariate summary for report ----------
-print("\nResiduals summary for report:")
-print(f"  • Per-equation Ljung–Box(10): already above (whiteness).")
-print(f"  • Corr matrix off-diagonal: {r:.3f} (p={p_val:.3g}); 95% CI [{ci_lo:.3f}, {ci_hi:.3f}].")
-print(f"  • CCF lags within ±{band:.3f}? Inspect the stem plot; spikes outside the band indicate remaining cross-dependence.")
+pairs = list(combinations(u.columns, 2))
+fig, axes = plt.subplots(1, len(pairs), figsize=(15, 4))
+for ax, (a, b) in zip(axes, pairs):
+    x = u[a].values; y = u[b].values
+    m = np.isfinite(x) & np.isfinite(y)
+    x = x[m]; y = y[m]
+    r, p, n = corr_pval(x, y)
+    coef = np.polyfit(x, y, 1)
+    xx = np.linspace(x.min(), x.max(), 200)
+    yy = coef[0]*xx + coef[1]
+    ax.scatter(x, y, s=6, alpha=0.6)
+    ax.plot(xx, yy, linewidth=1)
+    ax.axhline(0.0, linestyle="--", linewidth=1)
+    ax.axvline(0.0, linestyle="--", linewidth=1)
+    ax.set_title(f"{a} vs {b}\nr={r:+.3f}, p={p:.3g}")
+    ax.set_xlabel(a); ax.set_ylabel(b)
+fig.suptitle("Pairwise residual scatter plots (all 3 combinations) — full sample")
+fig.tight_layout()
+plt.show()
 
+u_2024 = u.loc[u.index < split_date]
+u_2025 = u.loc[u.index >= split_date]
 
+def plot_pair_scatter(u_period, title_prefix):
+    pairs = list(combinations(u_period.columns, 2))
+    fig, axes = plt.subplots(1, len(pairs), figsize=(15, 4))
+    for ax, (a, b) in zip(axes, pairs):
+        x = u_period[a].to_numpy(); y = u_period[b].to_numpy()
+        m = np.isfinite(x) & np.isfinite(y)
+        x = x[m]; y = y[m]
+        r = np.corrcoef(x, y)[0,1]
+        coef = np.polyfit(x, y, 1)
+        xx = np.linspace(x.min(), x.max(), 200)
+        yy = coef[0]*xx + coef[1]
+        ax.scatter(x, y, s=6, alpha=0.6)
+        ax.plot(xx, yy, linewidth=1)
+        ax.axhline(0.0, linestyle="--", linewidth=1)
+        ax.axvline(0.0, linestyle="--", linewidth=1)
+        ax.set_title(f"{a} vs {b}\nr={r:+.3f}")
+        ax.set_xlabel(a); ax.set_ylabel(b)
+    fig.suptitle(f"{title_prefix}: pairwise residual scatters")
+    fig.tight_layout()
+    plt.show()
 
+plot_pair_scatter(u_2024, "2024 (train)")
+plot_pair_scatter(u_2025, "2025 (test)")
 
+print("\nResidual correlation matrix — 2024 (train):")
+print(u_2024.corr())
+print("\nResidual correlation matrix — 2025 (test):")
+print(u_2025.corr())
 
-###########################################################
-### 3.3
-print(" === Question 3.3 ===")
+def fisher_change_test(x1, y1, x2, y2):
+    def _zbits(x, y):
+        m = np.isfinite(x) & np.isfinite(y)
+        r = np.corrcoef(x[m], y[m])[0,1]
+        n = m.sum()
+        z = np.arctanh(np.clip(r, -0.999999, 0.999999))
+        se = 1/np.sqrt(max(1, n-3))
+        return r, z, se, n
+    r1, z1, se1, n1 = _zbits(x1, y1)
+    r2, z2, se2, n2 = _zbits(x2, y2)
+    zdiff = (z1 - z2) / np.sqrt(se1**2 + se2**2)
+    p = 2 * (1 - stats.norm.cdf(abs(zdiff)))
+    return r1, r2, zdiff, p, n1, n2
 
-###########################################################
+print("\nChange in contemporaneous residual correlation (2024 vs 2025):")
+for a, b in combinations(u.columns, 2):
+    r1, r2, z, p, n1, n2 = fisher_change_test(u_2024[a].values, u_2024[b].values,
+                                              u_2025[a].values, u_2025[b].values)
+    verdict = "different" if p < 0.05 else "no clear change"
+    print(f"{a} vs {b}: r_2024={r1:+.3f} (n={n1}), r_2025={r2:+.3f} (n={n2}), z={z:+.2f}, p={p:.3g} → {verdict}")
+
 
 ### 3.4
 print(" === Question 3.4 ===")
