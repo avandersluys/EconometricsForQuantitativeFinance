@@ -394,7 +394,6 @@ from statsmodels.tsa.vector_ar.vecm import coint_johansen, VECM
 from scipy import stats
 
 # VAR analysis configuration parameters
-path = "/Users/alexandervds/Documents/GitHub/EconometricsForQuantitativeFinance/Case2/sp_9.csv"
 cols = ["SPX5.L", "SPY5z.CHIX", "SPY5.P"]  # Three ETF series for multivariate analysis
 session_start, session_end = "09:00", "17:30"  # Trading session hours
 p_assign = 5  # VAR lag order as specified in assignment
@@ -404,7 +403,7 @@ split_date = pd.Timestamp("2025-01-01")  # Train/test split date
 COINTEG_FREQ = "10min"  # Frequency for cointegration analysis (thinning)
 
 # Load and prepare multivariate price data
-df = pd.read_csv(path, parse_dates=["DateTime"]).set_index("DateTime").sort_index()
+df = pd.read_csv(github_url, parse_dates=["DateTime"]).set_index("DateTime").sort_index()
 prices = df[cols].astype(float).where(lambda x: x > 0).dropna(how="any")
 prices = prices.between_time(session_start, session_end)
 
