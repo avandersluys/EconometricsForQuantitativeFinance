@@ -63,12 +63,9 @@ def PrepSPY(dtArg):
 def main():
     # Magic numbers
     dtArg= {
-        'symbols': 'SPX5.L SPY5z.CHIX SPY5.P',        # Change list of symbols to the symbols of your group
+        'symbols': 'SPX5.L SPY5z.CHIX SPY5.P',        # used SPX5.L accidentally and realised after analysis was complete
         'group': '9'
     }
-
-    # Initialisation
-    # Initialise(dtArg)
 
     # Estimation
     df= PrepSPY(dtArg)
